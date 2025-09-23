@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "Preprocessing/Methods used.md",
+                "file": "Project description.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "Methods used"
+              "title": "Project description"
             }
           }
         ]
@@ -94,7 +94,7 @@
             "state": {
               "type": "backlink",
               "state": {
-                "file": "Preprocessing/Methods used.md",
+                "file": "Project description.md",
                 "collapseAll": false,
                 "extraContext": false,
                 "sortOrder": "alphabetical",
@@ -104,7 +104,7 @@
                 "unlinkedCollapsed": true
               },
               "icon": "links-coming-in",
-              "title": "Backlinks for Methods used"
+              "title": "Backlinks for Project description"
             }
           },
           {
@@ -113,12 +113,12 @@
             "state": {
               "type": "outgoing-link",
               "state": {
-                "file": "Preprocessing/Methods used.md",
+                "file": "Project description.md",
                 "linksCollapsed": false,
                 "unlinkedCollapsed": true
               },
               "icon": "links-going-out",
-              "title": "Outgoing links from Methods used"
+              "title": "Outgoing links from Project description"
             }
           },
           {
@@ -142,13 +142,13 @@
             "state": {
               "type": "outline",
               "state": {
-                "file": "Preprocessing/Methods used.md",
+                "file": "Project description.md",
                 "followCursor": false,
                 "showSearch": false,
                 "searchQuery": ""
               },
               "icon": "lucide-list",
-              "title": "Outline of Methods used"
+              "title": "Outline of Project description"
             }
           }
         ]
@@ -169,14 +169,14 @@
       "bases:Create new base": false
     }
   },
-  "active": "b4f3e377835bbb9e",
+  "active": "e313839c371b465c",
   "lastOpenFiles": [
+    "Preprocessing/Methods used.md",
     "Devices",
     "Preprocessing/Preprocessing.md",
-    "Preprocessing/Methods used.md",
     "Channels - Setup.md",
     "Dictionary.md",
-    "Opis projektu.md",
+    "Project description.md",
     "Preprocessing",
     "Papers/Usuwanie artefaktów - podsumowanie.md",
     "Papers/Niedostępne.md",
