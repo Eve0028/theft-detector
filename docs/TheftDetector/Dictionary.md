@@ -62,3 +62,16 @@ Celem było wyeliminowanie kilku słabości klasycznego CIT:
 - W CTP wymuszono aktywny udział badanych w każdej próbie → większa kontrola nad tym, że bodźce są naprawdę przetwarzane.
 
 ---
+#### Multidimensional Memory Test (MDMT)
+**„test-pułapka” (entrapment procedure)**, którego celem jest wykrycie osób **symulujących problemy z pamięcią (malingering)**.
+
+**Jak działa MDMT:**
+1. **Bodziec początkowy**: badanej osobie pokazuje się **trzycyfrową liczbę** (np. 472).
+2. **Krótka przerwa**: po **5–10 sekundach** pojawia się kolejna liczba.
+3. **Zadanie uczestnika**: określić, czy ta druga liczba jest **taka sama** (match), czy **inna** (mismatch).
+    - Obie opcje (match/mismatch) pojawiają się z równym prawdopodobieństwem (50%).
+**Założenie**:
+- **Zdrowe osoby** oraz nawet pacjenci z **umiarkowanym urazem głowy** radzą sobie **bardzo dobrze** (zadanie jest bardzo łatwe).
+- **Osoby udające deficyt** (np. w kontekście spraw sądowych/odszkodowawczych) będą wypadały **nienaturalnie słabo**.
+
+
