@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "Project description.md",
+                "file": "Dictionary.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "Project description"
+              "title": "Dictionary"
             }
           }
         ]
@@ -171,17 +171,17 @@
   },
   "active": "e313839c371b465c",
   "lastOpenFiles": [
-    "Preprocessing/Methods used.md",
-    "Devices",
-    "Preprocessing/Preprocessing.md",
-    "Channels - Setup.md",
-    "Dictionary.md",
     "Project description.md",
-    "Preprocessing",
-    "Papers/Usuwanie artefaktów - podsumowanie.md",
+    "Dictionary.md",
+    "Preprocessing/Methods used.md",
     "Papers/Niedostępne.md",
-    "Papers/2019 - REVIEW - P300 in detecting concealed information and deception.md",
     "Papers/2019 - Item Roles Explored in a Modified P300-Based CTP Concealed Information Test.md",
+    "Papers/2019 - REVIEW - P300 in detecting concealed information and deception.md",
+    "Papers/Usuwanie artefaktów - podsumowanie.md",
+    "Preprocessing/Preprocessing.md",
+    "Devices",
+    "Channels - Setup.md",
+    "Preprocessing",
     "Papers",
     "Welcome.md"
   ]

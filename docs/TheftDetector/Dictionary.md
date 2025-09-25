@@ -23,5 +23,42 @@
 Polega na tym, że w serii powtarzających się, częstych bodźców pojawiają się rzadkie, różniące się bodźce (_oddballs_), które wywołują **zwiększoną reakcję poznawczą i neuronalną (P300)**. To jedno z najważniejszych narzędzi badania procesów uwagi i rozpoznawania w EEG/ERP.
 
 ---
+#### P300
+P300 (często zapisywane też jako **P3**) to jedna z najbardziej znanych składowych potencjałów wywołanych (ERP, ang. _event-related potentials_) w EEG.
+- **Litera P** oznacza, że jest to fala **dodatnia** (ang. _positive_).
+- **300** wskazuje typowy czas jej pojawienia się – około **300 ms** po bodźcu (choć w praktyce może wystąpić między 250–600 ms, w zależności od zadania, wieku czy stanu badanego).
+
+P300 pojawia się, gdy mózg **rozpoznaje i przetwarza istotny lub rzadki bodziec** wśród powtarzających się, mniej ważnych.  
+Najczęściej bada się ją w tzw. **paradygmacie „oddball”**:
+- Badany słyszy lub widzi serię często występujących bodźców (np. dźwięk o określonej wysokości, literę „X”),
+- od czasu do czasu pojawia się inny, **rzadki bodziec** (np. wyższy dźwięk, litera „O”),
+- mózg reaguje na ten odmienny bodziec silną falą P300.
+
+---
+#### CIT (Concealed Information Test)
+**Concealed Information Test (CIT)**, znany wcześniej jako _Guilty Knowledge Test (GKT)_, to metoda psychofizjologiczna stosowana w badaniach nad wykrywaniem ukrytej wiedzy u badanych osób. Polega na rejestrowaniu reakcji fizjologicznych (najczęściej EEG, ERP lub wskaźników autonomicznych, takich jak reakcja skórno-galwaniczna, rytm serca) w odpowiedzi na zestaw bodźców zawierających:
+1. **Bodźce istotne (probe items)** – związane z wiedzą, którą posiada tylko osoba wtajemniczona (np. szczegóły miejsca zdarzenia).
+2. **Bodźce neutralne (irrelevant items)** – niepowiązane z ukrytą informacją.
+
+---
 #### Blind Imax test 
 To procedura w ramach P300-based CIT, w której przy braku wcześniejszej wiedzy o _probe_ identyfikuje się go jako bodziec wywołujący **największą średnią odpowiedź P300** u badanego (Imax), a następnie weryfikuje jego odróżnialność od bodźca z drugą co do wielkości reakcją.
+
+---
+#### Complex Trial Protocol (CTP)
+Jest to szczególny wariant **Concealed Information Test (CIT)**.
+- W klasycznym **CIT** uczestnik widzi pojedynczy bodziec (np. słowo, obraz), a badacze analizują reakcję fizjologiczną (np. P300 w EEG lub reakcję skórno-galwaniczną).
+- **CTP** wprowadza bardziej złożoną strukturę każdej próby, tak aby:
+    1. Połączyć **detekcję rozpoznania ukrytej informacji** (np. szczegółów zdarzenia) z
+    2. **kontrolnym zadaniem reakcyjnym**, które pozwala upewnić się, że badany skupia uwagę i przetwarza bodziec.
+
+Każda próba składa się z kilku etapów:
+1. **Prezentacja bodźca kluczowego (critical stimulus)** – np. szczegół przestępstwa, który powinien wywołać P300 u osoby znającej informację.
+2. **Instrukcja zadaniowa / pytanie kontrolne** – uczestnik musi udzielić odpowiedzi na pytanie wymagające reakcji (np. nacisnąć przycisk przy określonym słowie).
+3. **Reakcja motoryczna uczestnika** – zapewnia, że skupia się na zadaniu.
+
+Celem było wyeliminowanie kilku słabości klasycznego CIT:
+- W CIT uczestnik mógłby po prostu unikać patrzenia na bodźce lub celowo rozpraszać uwagę, co osłabiałoby P300.
+- W CTP wymuszono aktywny udział badanych w każdej próbie → większa kontrola nad tym, że bodźce są naprawdę przetwarzane.
+
+---
