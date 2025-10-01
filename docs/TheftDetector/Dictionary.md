@@ -74,4 +74,22 @@ Celem było wyeliminowanie kilku słabości klasycznego CIT:
 - **Zdrowe osoby** oraz nawet pacjenci z **umiarkowanym urazem głowy** radzą sobie **bardzo dobrze** (zadanie jest bardzo łatwe).
 - **Osoby udające deficyt** (np. w kontekście spraw sądowych/odszkodowawczych) będą wypadały **nienaturalnie słabo**.
 
+---
+#### BAD method (Bootstrap Amplitude Difference)
+- Polega na **bootstrappingu różnicy amplitud P300** między:
+    - **Probe** – bodziec powiązany z ukrytą wiedzą
+    - **Irrelevant** – bodźce nieistotne
+- Procedura:
+    - Losuje się **100 iteracji różnic amplitud P300** (czyli 100 symulacji/ponownych próbek danych).
+    - Sprawdza się, czy w **co najmniej 90% iteracji** amplituda P300 dla **probe > irrelevant**.
+- Jeśli tak – uczestnik jest uznawany za „winnego” / posiadającego ukrytą wiedzę.
+
+---
+#### BC-AD method (Bootstrapped Correlation-Amplitude Difference)
+- Sprawdza **korelację amplitud P300**:
+    - Porównuje **probe-target** z **probe-irrelevant**.
+- Kryterium:
+    - Jeśli w **90% przypadków korelacja probe-target > probe-irrelevant**, uczestnik jest uznawany za „winnego”.
+
+Zazwyczaj gorsza wynikowo niż metoda **BAD**
 
