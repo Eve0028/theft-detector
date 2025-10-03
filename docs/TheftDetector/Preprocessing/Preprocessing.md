@@ -5,9 +5,9 @@ https://pmc.ncbi.nlm.nih.gov/articles/PMC6685925/
 
 - **Zmiana częstotliwości próbkowania**: dane zostały przeskalowane do **250 Hz** – obniżenie sampling rate redukuje ilość danych i szum, przy zachowaniu wystarczającej rozdzielczości czasowej do analizy ERP.
     
-- **Filtracja pasmowoprzepustowa (bandpass filter)**: zastosowano filtr FIR z oknem Hamminga (Hamming-windowed sinc FIR) o pasmie **0.3–30 Hz** (tłumienie −6 dB).
-    - Dolne odcięcie (0.3 Hz) usuwa dryf niskoczęstotliwościowy (artefakty np. z ruchu czy potu).
-    - Górne odcięcie (30 Hz) eliminuje wysokoczęstotliwościowy szum mięśniowy i zakłócenia.
+- **Filtracja pasmowoprzepustowa (bandpass filter)**: filtr FIR z oknem Hamminga (Hamming-windowed sinc FIR) o pasmie **0.1–12 Hz** (lub 0.3-30 Hz; lub 0.1-30 Hz; lub 0.3-12 Hz) (tłumienie −6 dB) - P300 ma energię głównie w zakresie **1–8 Hz**.
+    - Dolne odcięcie (0.1 Hz) usuwa dryf niskoczęstotliwościowy (artefakty np. z ruchu czy potu).
+    - Górne odcięcie (12 Hz) eliminuje wysokoczęstotliwościowy szum mięśniowy i zakłócenia.
 
 ---
 ## 2. Segmentacja (epoching)
