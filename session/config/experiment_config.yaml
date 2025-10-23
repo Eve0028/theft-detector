@@ -1,0 +1,129 @@
+# P300-Based CIT Experiment Configuration
+
+# Participant Information
+participant:
+  id: "P001"
+  session: 1
+  condition: "thief"  # Options: "thief" or "control"
+  
+# EEG Device Configuration
+eeg:
+  device_type: "none"  # Options: "brainaccess", "muse_s", "none"
+  lsl_stream_name: "P300_CIT_Markers"
+  lsl_stream_type: "Markers"
+  lsl_stream_id: "p300cit001"
+  send_markers: false
+  
+# Display Settings
+display:
+  fullscreen: true
+  screen_number: 0  # 0 for primary monitor
+  background_color: [0, 0, 0]  # RGB: black
+  text_color: [255, 255, 255]  # RGB: white
+  fixation_color: [255, 255, 255]  # RGB: white
+  units: "pix"  # or "norm", "height"
+  
+# Timing Parameters (in seconds)
+timing:
+  fixation_duration: 0.5
+  s1_duration: 0.4
+  isi_min: 1.0
+  isi_max: 1.5
+  s2_duration: 0.3
+  s2_response_window: 1.0
+  iti_min: 0.5
+  iti_max: 0.8
+  block_break_duration: 120  # 2 minutes
+  
+# Trial Configuration
+trials:
+  total_trials: 25
+  num_blocks: 1
+  probe_repetitions: 5
+  irrelevant_repetitions: 5  # per irrelevant object
+  target_proportion: 0.2  # 20% targets in S2
+  
+# Stimuli Configuration
+stimuli:
+  # S1: Images
+  images:
+    probe_object: "pendrive"
+    irrelevant_objects:
+      - "mouse"
+      - "headphones"
+      - "cable_usb"
+      - "charger_tip"
+    use_normalized: true  # Use normalized images from images/normalized/
+    image_height: 400  # pixels
+    
+  # S2: Digit strings
+  digits:
+    target: "111111"
+    nontargets:
+      - "222222"
+      - "333333"
+      - "444444"
+      - "555555"
+    font_size: 72
+    
+# Response Keys
+keys:
+  s1_response: "z"  # Left hand
+  s2_target: "m"    # Right hand
+  s2_nontarget: "n" # Right hand
+  continue_key: "space"
+  quit_key: "escape"
+  
+# Pop Quiz Configuration
+pop_quiz:
+  enabled: false  # Set to true to enable pop quizzes
+  probability: 0.05  # 5% chance after each trial
+  num_options: 4
+  
+# Data Output
+output:
+  data_directory: "data"
+  behavioral_subdirectory: "behavioral"
+  logs_subdirectory: "logs"
+  save_psychopy_log: true
+  
+# Instructions Text
+instructions:
+  welcome: |
+    Welcome to the experiment!
+    
+    You will see a series of images of different objects,
+    followed by digit strings.
+    
+    Press SPACE to continue.
+    
+  main_task: |
+    TASK INSTRUCTIONS:
+    
+    1. When you see an IMAGE:
+       → Press 'Z' with your LEFT hand
+    
+    2. When you see DIGITS:
+       → Press 'M' if digits are "111111" (TARGET)
+       → Press 'N' for any other digits (NONTARGET)
+    
+    Try to respond as quickly and accurately as possible.
+    Pay attention to all images!
+    
+    Press SPACE when ready to begin.
+    
+  block_break: |
+    Block {block_num} of {total_blocks} complete!
+    
+    Take a break. Relax your eyes.
+    The next block will start in {remaining_time} seconds.
+    
+    Press SPACE to continue when ready.
+    
+  end: |
+    Experiment complete!
+    
+    Thank you for your participation.
+    
+    Press SPACE to exit.
+

@@ -1,0 +1,62 @@
+# P300-CIT Experiment - Git Ignore
+
+# Data files (never commit participant data)
+data/
+*.csv
+!images/image_metadata.csv
+
+# Logs
+*.log
+logs/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# PsychoPy
+*.psydat
+psychopy_data/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Normalized images (generated)
+images/normalized/
+
+# Temporary files
+*.tmp
+*.bak
+*.backup
+

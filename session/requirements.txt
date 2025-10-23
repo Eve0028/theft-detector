@@ -1,0 +1,24 @@
+# P300-Based Concealed Information Test Experiment
+# Python 3.10 or 3.11 required (psychopy does not support 3.12+ yet)
+
+# Core experiment framework
+psychopy
+psychtoolbox
+
+# LSL for EEG synchronization
+pylsl
+
+# Image processing
+Pillow
+opencv-Python
+numpy
+
+# Data handling
+pandas
+
+# Configuration
+PyYAML
+
+# Utilities
+python-dateutil
+
