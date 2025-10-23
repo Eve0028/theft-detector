@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "Test statystyczny/Metoda BAD.md",
+                "file": "Papers/2022 - EEG-based lie detection using ERP P300 in response to known and unknown faces - An overview.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "Metoda BAD"
+              "title": "2022 - EEG-based lie detection using ERP P300 in response to known and unknown faces - An overview"
             }
           }
         ]
@@ -78,7 +78,7 @@
       }
     ],
     "direction": "horizontal",
-    "width": 300
+    "width": 272.5
   },
   "right": {
     "id": "c42556c924340d78",
@@ -171,24 +171,28 @@
   },
   "active": "e313839c371b465c",
   "lastOpenFiles": [
-    "Preprocessing/Preprocessing - Muse.md",
-    "Preprocessing/Preprocessing.md",
+    "Papers/2020 - Evidence of memory from brain data.md",
+    "Papers/2022 - EEG-based lie detection using ERP P300 in response to known and unknown faces - An overview.md",
+    "Papers/2019 - REVIEW - P300 in detecting concealed information and deception.md",
+    "Papers/2019 - Item Roles Explored in a Modified P300-Based CTP Concealed Information Test.md",
+    "Papers/2017 - Deception detection of EEG-P300 component classified by SVM method.md",
+    "Dictionary.md",
+    "Papers/2009 - A new approach for EEG feature extraction in P300-based lie detection.md",
+    "Papers/2008 - The Complex Trial Protocol (CTP) A new, countermeasure-resistant, accurate, P300-based method for detection of concealed information.md",
+    "Papers/Usuwanie artefaktów - podsumowanie.md",
     "Eksperyment/Pipeline sesji - końcowy.md",
     "Eksperyment/Pipeline - konfiguracja.md",
     "Test statystyczny/Metoda BAD.md",
-    "Papers/Usuwanie artefaktów - podsumowanie.md",
-    "Papers/2020 - Evidence of memory from brain data.md",
-    "Papers/Niedostępne.md",
-    "Papers/2019 - REVIEW - P300 in detecting concealed information and deception.md",
-    "Dictionary.md",
-    "Test statystyczny",
     "Project description.md",
+    "Preprocessing/Preprocessing.md",
+    "Preprocessing/Preprocessing - Muse.md",
+    "Papers/Niedostępne.md",
+    "Test statystyczny",
     "Channels - Setup.md",
     "Preprocessing/Methods used.md",
     "Devices/Muse S Athena.md",
     "Devices/Brainaccess.md",
     "Devices/Muse S Athena - AUX electrodes.md",
-    "Papers/2019 - Item Roles Explored in a Modified P300-Based CTP Concealed Information Test.md",
     "Eksperyment",
     "Devices",
     "Preprocessing",

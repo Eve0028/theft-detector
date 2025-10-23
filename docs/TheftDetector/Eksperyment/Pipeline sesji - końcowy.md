@@ -1,10 +1,10 @@
 ## Ustawienia ogólne
-- Sprzęt: Muse S Athena lub Brainaccess, PC z PsychoPy, LSL do wysyłania markerów.
+- Sprzęt: Muse S Athena lub BrainAccess Standard Kit, PC z PsychoPy, LSL do wysyłania markerów.
 - Wejście uczestnika: klawiatura.
   - `Z` — odpowiedź na S1 (lewa ręka) — stała odpowiedź (wszyskie S1).
   - `M` — odpowiedź "target" na S2 (prawa ręka).
   - `N` — odpowiedź "nontarget" na S2 (prawa ręka).
-- Bodźce S1: obrazy (1 × probe, 4 × irrelevants). Każdy obraz to jeden plik (jeden widok).
+- Bodźce S1: obiekty/obrazy (1 × probe, 4 × irrelevants). Każdy obiekt to możliwość kilku obrazów (kilku widoków).
 - Bodźce S2: napisy/numery (np. "111111" jako target; "222222","333333"… jako nontargety).
 ---
 ## Struktura triala (kolejność i czasy)
@@ -54,8 +54,8 @@
 
 #### Dodatkowe elementy sesji:
 - Instrukcje i zgoda: **10 min**
-- Montaż i kontrola sprzętu, kalibracja, krótki baseline: **15 min**
 - Mock crime / encoding (uczestnik zapoznaje się z probe): **5 min**
+- Montaż i kontrola sprzętu, kalibracja, krótki baseline: **15 min**
 - Przerwy między blokami: 4 przerwy × 2 min = **8 min**  (dla 5 bloków)
 - Krótkie sprawdzenie sygnału i ewentualne korekty między blokami (wliczone w przerwy, + ~2 min dodatkowo w trakcie sesji) **(opcjonalnie)**
 - Debriefing i zakończenie: **5 min**

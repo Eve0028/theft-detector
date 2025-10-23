@@ -26,6 +26,17 @@ Jej celem jest sprawdzenie, czy odpowiedzi na bodźce **probe** (znane sprawcy) 
    - Jeśli proporcja ≥ 90% → uczestnik uznany za „guilty”.  
    - Jeśli proporcja ≈ 50% → brak dowodu na rozpoznanie (uczestnik „innocent”).  
 
+
+**Podsumowując:**
+Obliczamy średnie lub peak-to-peak amplitudy z sygnałów które zmierzyliśmy 'na każdym pokazanym zdjęciu' (zazwyczaj bierzemy 300-600 ms od chwili pojawienia się zdjęcia).
+Potem bootsrtapujemy (np. 1000 razy):
+- Losowo wybieramy średnie z epok 'probe' (czyli tych na których było zdjęcie kradzionego przedmiotu) i 'irrelevant' (zdjęć 4-5 pozostałych przedmiotów)
+- Obliczamy różnice tych średnich: `diff_k = mean_probe - mean_irrelevant`
+- Sprawdzamy czy `diff_k > 0` (czy probe > irrelevant)
+- Obliczamy odsetek tych iteracji (`p_bootstrap`) w których `diff_k > 0`
+- Jeśli `p_bootstrap >= 0.90` -> klasyfikacja = guilty (czyli uczestnik wykazał znaczącą wartość P300 do probe)
+- Jeśli `p_bootstrap < 0.90` -> klasyfikacja = innocent / niepewna
+
 ---
 ## ## Dlaczego bierzemy średnią z całego okna 300–600 ms?
 

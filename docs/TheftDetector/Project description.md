@@ -1,5 +1,10 @@
 ### P300 in detecting concealed information and deception
 
+**Detekcja ukrytej wiedzy metodą P300-BAD**
+
+Celem pracy jest ocena możliwości zastosowania metody BAD (Bootstrapped Amplitude Difference) do detekcji ukrytej wiedzy w oparciu o potencjał P300, rejestrowany przy użyciu niskokanałowego, konsumenckiego systemu EEG. Projekt ma charakter eksperymentalny i opiera się na paradygmacie „mock crime” – uczestnicy biorą udział w symulowanej kradzieży przedmiotu (np. biżuterii lub pendrive’a), po czym poddawani są testowi typu Concealed Information Test (CIT), w którym prezentowane są obrazy ukradzionego przedmiotu (probe), przedmiotów neutralnych (irrelevants) oraz bodźce celowe (targety).
+Analiza ma na celu porównanie średnich amplitud P300 w przedziale 300–600 ms między kategoriami bodźców, by sprawdzić, czy możliwe jest wiarygodne wykrycie sprawcy.
+
 **Złodziej:**
 1. Uczestnik badania wchodzi do pokoju, w którym na stole leży pudełko, w którym jest kradziony przedmiot
 2. Otwiera pudełko, podnosi go, dobrze mu się przygląda i bada go, chowa go do kieszeni, oraz wychodzi z pokoju
@@ -15,18 +20,16 @@
 **Każda próba składała się z dwóch kolejno prezentowanych bodźców:**
 - **S1** (pierwszy bodziec):
 	  - Może być probe (obraz przedmiotu, który ukradł) albo irrelevant (inne przedmioty).
-	  - Reakcja na S1 jest zawsze taka sama: naciśnięcie lewego przycisku myszy w lewej ręce, niezależnie od tego, czy pojawił się probe czy irrelevant.
+	  - Reakcja na S1 jest zawsze taka sama: naciśnięcie klawiszu "Z" na klawiaturze lewą ręką, niezależnie od tego, czy pojawił się probe czy irrelevant.
 	  - Badanym powiedziano jednak, że w losowych momentach będą im zadawane „pop quizy” sprawdzające rozpoznanie S1. Kara za błędy w tych quizach miała zwiększyć motywację do faktycznego zwracania uwagi na S1.
 - **S2** (drugi bodziec, 1–2 s po S1):
 	  - Prezentowane były ciągi cyfr:
 	    - Target: np. „11111” (rzadki bodziec wymagający innej reakcji).
 	    - Nontargets: np. „22222”, „33333”, „44444”, „55555”.
-	  - Wymagana była jawna reakcja dyskryminacyjna: lewy lub prawy przycisk myszy w prawej ręce, w zależności od tego, czy bodziec był targetem czy nontargetem.
+	  - Wymagana była jawna reakcja dyskryminacyjna: naciśnięcie klawisza "N" (nontarget) lub "M" (target) prawą dłonią.
 
 Vsouce, 22min:
 https://www.youtube.com/watch?v=gWoPI-VoFV0&list=PLZRRxQcaEjA7wmh3Z6EQuOK9fm1CqnJCI&index=3
 https://youtu.be/gWoPI-VoFV0?list=PLZRRxQcaEjA7wmh3Z6EQuOK9fm1CqnJCI&t=1278
 Kanały: Pz, Cz, Fz, Fp1
 
-Obliczamy średni sygnał eeg pojawiąjący się przy ukradzionym przedmiocie, oraz porównujemy go ze średnią sygnałów z pozostałych przedmiotów.
-Peak-to-peak difference - na uśrednionym sygnale pobranym podczas wyświetlania ukradzionego obiektu. Czyli obliczamy różnicę min-max tego uśrednionego sygnału- ukradł ten kto ma ją największą
