@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "Papers/2022 - EEG-based lie detection using ERP P300 in response to known and unknown faces - An overview.md",
+                "file": "Papers/2023 - Brain fingerprinting field study on major, terrorist crimes supports the brain fingerprinting scientific standards hypothesis.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "2022 - EEG-based lie detection using ERP P300 in response to known and unknown faces - An overview"
+              "title": "2023 - Brain fingerprinting field study on major, terrorist crimes supports the brain fingerprinting scientific standards hypothesis"
             }
           }
         ]
@@ -78,7 +78,7 @@
       }
     ],
     "direction": "horizontal",
-    "width": 272.5
+    "width": 532.5
   },
   "right": {
     "id": "c42556c924340d78",
@@ -171,32 +171,38 @@
   },
   "active": "e313839c371b465c",
   "lastOpenFiles": [
+    "Eksperyment/Classification CIT/Porady.md",
+    "Eksperyment/Classification CIT/20 naukowych standardów - Brain Fingerprinting (BF).md",
+    "Papers/2023 - Brain fingerprinting field study on major, terrorist crimes supports the brain fingerprinting scientific standards hypothesis.md",
+    "Eksperyment/Classification CIT.md",
+    "Eksperyment/Classification CIT",
+    "Eksperyment/CTP/CTP - Pipeline - konfiguracja.md",
+    "Eksperyment/CTP/CTP - Pipeline sesji - końcowy.md",
+    "Eksperyment/CTP",
+    "Papers/2014 - Brain fingerprinting classification concealed information test detects US Navy military medical information with P300.md",
+    "Papers/2012 - Brain fingerprinting - a comprehensive tutorial review of detection of concealed information with event-related brain potentials.md",
     "Papers/2020 - Evidence of memory from brain data.md",
+    "Dictionary.md",
+    "Papers/2008 - The Complex Trial Protocol (CTP) A new, countermeasure-resistant, accurate, P300-based method for detection of concealed information.md",
+    "Project description.md",
+    "Channels - Setup.md",
+    "Test statystyczny/Metoda BAD.md",
+    "Preprocessing/Preprocessing - Muse.md",
+    "Preprocessing/Preprocessing.md",
     "Papers/2022 - EEG-based lie detection using ERP P300 in response to known and unknown faces - An overview.md",
     "Papers/2019 - REVIEW - P300 in detecting concealed information and deception.md",
     "Papers/2019 - Item Roles Explored in a Modified P300-Based CTP Concealed Information Test.md",
     "Papers/2017 - Deception detection of EEG-P300 component classified by SVM method.md",
-    "Dictionary.md",
     "Papers/2009 - A new approach for EEG feature extraction in P300-based lie detection.md",
-    "Papers/2008 - The Complex Trial Protocol (CTP) A new, countermeasure-resistant, accurate, P300-based method for detection of concealed information.md",
     "Papers/Usuwanie artefaktów - podsumowanie.md",
-    "Eksperyment/Pipeline sesji - końcowy.md",
-    "Eksperyment/Pipeline - konfiguracja.md",
-    "Test statystyczny/Metoda BAD.md",
-    "Project description.md",
-    "Preprocessing/Preprocessing.md",
-    "Preprocessing/Preprocessing - Muse.md",
     "Papers/Niedostępne.md",
     "Test statystyczny",
-    "Channels - Setup.md",
     "Preprocessing/Methods used.md",
     "Devices/Muse S Athena.md",
     "Devices/Brainaccess.md",
-    "Devices/Muse S Athena - AUX electrodes.md",
     "Eksperyment",
     "Devices",
     "Preprocessing",
-    "Papers",
-    "Welcome.md"
+    "Papers"
   ]
 }

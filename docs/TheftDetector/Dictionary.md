@@ -45,6 +45,13 @@ Najczęściej bada się ją w tzw. **paradygmacie „oddball”**:
 To procedura w ramach P300-based CIT, w której przy braku wcześniejszej wiedzy o _probe_ identyfikuje się go jako bodziec wywołujący **największą średnią odpowiedź P300** u badanego (Imax), a następnie weryfikuje jego odróżnialność od bodźca z drugą co do wielkości reakcją.
 
 ---
+#### 3ST (Three-Stimulus Protocol)
+Był jednym z **wczesnych** protokołów P300-based CIT. Był to protokół trójbodźcowy, co oznacza, że używał trzech rodzajów bodźców w losowej kolejności w osobnych próbach:
+• **Probe (P):** Rzadki bodziec zawierający utajnioną informację (np. narzędzie zbrodni).
+• **Irrelevant (I):** Częsty bodziec nieistotny (np. inne, nieużyteczne narzędzia).
+• **Target (T):** Rzadki bodziec celowy, wymagający unikalnej, zinstruowanej reakcji (np. naciśnięcia prawego przycisku). Pozostałe bodźce (P i I) wymagały innej reakcji (np. lewego przycisku)
+
+---
 #### Complex Trial Protocol (CTP)
 Jest to szczególny wariant **Concealed Information Test (CIT)**.
 - W klasycznym **CIT** uczestnik widzi pojedynczy bodziec (np. słowo, obraz), a badacze analizują reakcję fizjologiczną (np. P300 w EEG lub reakcję skórno-galwaniczną).
@@ -91,5 +98,38 @@ Celem było wyeliminowanie kilku słabości klasycznego CIT:
 - Kryterium:
     - Jeśli w **90% przypadków korelacja probe-target > probe-irrelevant**, uczestnik jest uznawany za „winnego”.
 
-Zazwyczaj gorsza wynikowo niż metoda **BAD**
+Zazwyczaj gorsza wynikowo niż metoda **BAD**?
 
+---
+#### Klasyfikacyjny CIT (Classification CIT)
+Ta metoda spełnia naukowe standardy brain fingerprinting. Polega na **analizie korelacji** (**BCD/BC–AD**, przy użyciu metody _bootstrapping_) między pełnymi wzorcami odpowiedzi mózgowej ERP na sondy a wzorcami odpowiedzi na cele oraz na bodźce nieistotne. Czyli bierze pod uwagę cały sygnał a nie tylko amplitudy.
+	- **IP:** Jeżeli odpowiedź na sondę jest bardziej **podobna** do odpowiedzi na cele (znane i istotne).
+	- **IA:** Jeżeli odpowiedź na sondę jest bardziej **podobna** do odpowiedzi na bodźce nieistotne (nieznane).
+	- W przypadku braku wysokiej pewności statystycznej w obu kierunkach, wynik jest **nieokreślony (indeterminate)**.
+	- **Kryterium:** Ustalono, że pewność statystyczna musi wynosić **90%** zarówno dla oznaczeń IP, jak i IA.
+Używa się jej z metodą zbierania danych taką jak 3TS (zamiast CTP zpodziałem na S1 i S2). Tylko 
+
+---
+#### Porównawczy CIT (Comparison CIT)
+Ta metoda nie spełnia standardów BFSS i **ignoruje odpowiedzi na cele**. Używa _bootstrappingu_ do obliczenia prawdopodobieństwa, że **amplituda** odpowiedzi ERP na sondy jest **większa** niż amplituda odpowiedzi na bodźce nieistotne.
+	- **IP:** Jeżeli prawdopodobieństwo, że sonda jest większa niż nieistotne, jest >90%.
+	- **IA:** Jeżeli prawdopodobieństwo, że sonda jest większa niż nieistotne, jest <90%.
+	- Ta metoda **nie ma kategorii nieokreślonej**
+
+---
+#### P300-MERMER (Memory and Encoding Related Multifaceted Electroencephalographic Response)
+Źródła wskazują, że P300-MERMER jest bardziej kompleksową reakcją mózgową niż sam P300, obejmującą również późniejszy potencjał negatywny (LNP):
+1. **Zakres czasowy analizy (Epoka):**
+	- **P300** to wczesna pozytywna fala ERP, tradycyjnie analizowana w przedziale **300–900 ms** po bodźcu.
+	- **P300-MERMER** (lub P300 plus LNP – _Late Negative Potential_) obejmuje szerszy zakres czasowy, zazwyczaj **300–1500 ms** po bodźcu.
+2. **Składowe:**
+    - **P300-MERMER** jest równoważny sumie szczytowych amplitud **P300** i **LNP** (późnego potencjału negatywnego). Amplituda P300-MERMER jest często definiowana jako różnica między najwyższym napięciem w oknie P300 (300–900 ms) a najniższym napięciem w oknie LNP (900–1500 ms).
+---
+#### Porównanie metod
+|                        |                                                                                                  |                                                                                                                                                                                                                                                                                                                                   |                                                                                    |
+| ---------------------- | ------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| Metoda                 | Pełna nazwa / Zastosowany algorytm                                                               | Opis i cel                                                                                                                                                                                                                                                                                                                        | Zgodność ze Standardami BFSS                                                       |
+| **BAD**                | **Bootstrapped Amplitude Difference** (jest to praktycznie to samo co **Comparison CIT**)        | Metoda wprowadzona przez Rosenfelda. Porównuje **amplitudę** odpowiedzi P300 na **sondy (Probes)** z amplitudą odpowiedzi na **bodźce nieistotne (Irrelevants)**. Jeżeli amplituda P > I z wysoką pewnością statystyczną (np. 90%), diagnozuje się obecność informacji (IP). Metoda ta **ignoruje** odpowiedzi na cele (Targets). | **Nie** spełnia naukowych standardów brain fingerprinting (BFSS).                  |
+| **BC–AD**              | **Bootstrapped Correlation Difference** (lub **Bootstrapped Correlation Analysis of Disparity**) | Metoda wprowadzona przez Farwella i Donchina. Porównuje **korelację** między falami ERP odpowiedzi na **sondy (Probes)** a **celami (Targets)**, z korelacją między sondami (Probes) a **bodźcami nieistotnymi (Irrelevants)**. Wysoka korelacja P-T w porównaniu do P-I wskazuje na obecność informacji (IP).                    | Metoda ta spełnia standardy BFSS i jest określana jako **Classification CIT**.     |
+| **Comparison CIT**     | Używa metody **BAD** lub jej wariantów.                                                          | Skupia się na pytaniu: **Czy odpowiedź na sondę jest znacząco większa niż na bodziec nieistotny?** (P > I). Nie używa odpowiedzi na cele jako wzorca dla informacji znanej.                                                                                                                                                       | **Nie** spełnia standardów BFSS (Standardy 13, 14, 17).                            |
+| **Classification CIT** | Używa metody **BC–AD** (lub podobnej korelacyjnej metody _bootstrappingu_).                      | Skupia się na pytaniu: **Czy wzorzec odpowiedzi na sondę jest bardziej podobny do wzorca odpowiedzi na cel, czy do wzorca odpowiedzi na bodziec nieistotny?**. Wykorzystuje odpowiedzi na cele (Targets) jako **wzorzec (template)** dla znanej, istotnej informacji.                                                             | **Tak** – to metodyka zgodna ze Standardami Naukowymi Brain Fingerprinting (BFSS). |
