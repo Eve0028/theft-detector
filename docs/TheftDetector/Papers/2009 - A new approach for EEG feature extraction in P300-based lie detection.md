@@ -1,6 +1,6 @@
-W badaniu zastosowano protokół **pojedynczej sondy (single-probe protocol)** (protokół GKT), który charakteryzuje się tym, że wszystkie trzy typy bodźców (_Probes_ (P), _Targets_ (T) i _Irrelevants_ (I)) były prezentowane w **jednym, ciągłym, losowym ciągu**.
+Metody: **Classification CIT (BCD)** oraz **Comparison CIT (BAD)**
 
-**Czyli nie to czego szukam**
+W badaniu zastosowano protokół **pojedynczej sondy (single-probe protocol)** (protokół GKT), który charakteryzuje się tym, że wszystkie trzy typy bodźców (_Probes_ (P), _Targets_ (T) i _Irrelevants_ (I)) były prezentowane w **jednym, ciągłym, losowym ciągu**.
 
 ### Podsumowanie
 

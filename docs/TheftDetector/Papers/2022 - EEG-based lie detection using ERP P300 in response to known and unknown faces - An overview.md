@@ -1,4 +1,8 @@
+Metoda: **CIT (Ogólny protokół)**
+
 Artykuł stanowi przegląd naukowych badań (2017–2022) nad wykrywaniem kłamstw za pomocą EEG, koncentrując się na **potencjale wywołanym P300** w odpowiedzi na wzrokowe bodźce w postaci znanych i nieznanych twarzy.
+
+### Użycie ML
 
 **Metodologia:**
 1. **Protokół:** Najczęściej stosowaną metodą jest **Test Ukrytej Informacji (CIT)** (78%).

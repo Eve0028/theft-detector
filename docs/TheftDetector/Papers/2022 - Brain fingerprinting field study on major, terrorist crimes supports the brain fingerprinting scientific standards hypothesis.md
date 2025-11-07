@@ -1,3 +1,4 @@
+Metoda: **Classification CIT (BF Classification CIT)** (porównanie do Comparison CIT)
 ## Skrócone podsumowanie
 
 Badanie terenowe porównywało dwie metody analizy potencjałów ERP (P300 i P300-MERMER) w wykrywaniu ukrytej informacji dotyczącej **poważnych przestępstw terrorystycznych** i tajnych operacji, w celu weryfikacji hipotezy standardów naukowych brain fingerprinting. Zastosowano **Klasyfikacyjny Test Ukrytej Informacji (Classification CIT)**, który spełnia 20 standardów naukowych (m.in. wykorzystuje korelacje odpowiedzi na cele i sondy) oraz **Porównawczy CIT (Comparison CIT)**, który ich nie spełnia (m.in. porównuje tylko amplitudy sond i nieistotnych bodźców).

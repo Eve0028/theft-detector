@@ -1,4 +1,6 @@
 https://pmc.ncbi.nlm.nih.gov/articles/PMC6685925/
+
+Metoda: **Complex Trial Protocol (CTP) (Zmodyfikowany)**
 ### Podsumowanie
 
 W badaniu wprowadzono bodźce wprowadzające (_inducers_) związane ze znajomością informacji (np. „moje”, „inne”) do zadania wtórnego w teście ukrytej informacji Complex Trial Protocol (CTP CIT) opartym na potencjale P300, w celu zwiększenia subiektywnej saliencji bodźców _probe_. Równocześnie zbadano wpływ saliencji bodźców głównych (imiona, daty urodzenia, ulubione zwierzęta).

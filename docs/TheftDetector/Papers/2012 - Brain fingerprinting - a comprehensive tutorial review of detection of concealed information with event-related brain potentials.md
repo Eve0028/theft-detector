@@ -1,3 +1,5 @@
+Metoda: **Classification CIT (BFP)**
+
 Artykuł stanowi kompleksowy przegląd techniki **Brain Fingerprinting (BF)**, naukowej metody obiektywnego wykrywania ukrytej informacji przechowywanej w mózgu poprzez pomiar fal mózgowych (EEG). BF jest metodą obiektywną, naukową i nieinwazyjną, mierzącą poznawcze przetwarzanie informacji, a nie kłamstwa, stres czy emocje.
 
 ### Użyte metody i mechanizmy

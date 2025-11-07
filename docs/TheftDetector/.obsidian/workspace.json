@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "Papers/2023 - Brain fingerprinting field study on major, terrorist crimes supports the brain fingerprinting scientific standards hypothesis.md",
+                "file": "Papers/2025-05 - Decoding deception with the P300 - A meta-analysis of the Concealed Information Test.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "2023 - Brain fingerprinting field study on major, terrorist crimes supports the brain fingerprinting scientific standards hypothesis"
+              "title": "2025-05 - Decoding deception with the P300 - A meta-analysis of the Concealed Information Test"
             }
           }
         ]
@@ -78,7 +78,7 @@
       }
     ],
     "direction": "horizontal",
-    "width": 532.5
+    "width": 397.5
   },
   "right": {
     "id": "c42556c924340d78",
@@ -171,35 +171,35 @@
   },
   "active": "e313839c371b465c",
   "lastOpenFiles": [
-    "Eksperyment/Classification CIT/Porady.md",
-    "Eksperyment/Classification CIT/20 naukowych standardów - Brain Fingerprinting (BF).md",
-    "Papers/2023 - Brain fingerprinting field study on major, terrorist crimes supports the brain fingerprinting scientific standards hypothesis.md",
-    "Eksperyment/Classification CIT.md",
-    "Eksperyment/Classification CIT",
-    "Eksperyment/CTP/CTP - Pipeline - konfiguracja.md",
-    "Eksperyment/CTP/CTP - Pipeline sesji - końcowy.md",
-    "Eksperyment/CTP",
-    "Papers/2014 - Brain fingerprinting classification concealed information test detects US Navy military medical information with P300.md",
-    "Papers/2012 - Brain fingerprinting - a comprehensive tutorial review of detection of concealed information with event-related brain potentials.md",
-    "Papers/2020 - Evidence of memory from brain data.md",
-    "Dictionary.md",
-    "Papers/2008 - The Complex Trial Protocol (CTP) A new, countermeasure-resistant, accurate, P300-based method for detection of concealed information.md",
-    "Project description.md",
-    "Channels - Setup.md",
-    "Test statystyczny/Metoda BAD.md",
-    "Preprocessing/Preprocessing - Muse.md",
-    "Preprocessing/Preprocessing.md",
+    "Papers/2025-09 Improving Electroencephalogram-Based Deception Detection in CIT under LSH.md",
+    "Papers/2025-05 - Decoding deception with the P300 - A meta-analysis of the Concealed Information Test.md",
+    "Papers/2025-04 - Neurophysiological Approaches to Lie Detection - A Systematic Review.md",
+    "Papers/2022-02 - Detection of concealed knowledge via the ERP-based - Real-life and real-crime.md",
+    "Papers/2023 - Event-related modulation of alpha rhythm explains the auditory P300-evoked response in EEG.md",
     "Papers/2022 - EEG-based lie detection using ERP P300 in response to known and unknown faces - An overview.md",
+    "Papers/2022 - Brain fingerprinting field study on major, terrorist crimes supports the brain fingerprinting scientific standards hypothesis.md",
+    "Papers/2020 - Evidence of memory from brain data.md",
     "Papers/2019 - REVIEW - P300 in detecting concealed information and deception.md",
     "Papers/2019 - Item Roles Explored in a Modified P300-Based CTP Concealed Information Test.md",
+    "Papers/2018 - BOOK - DETECTING CONCEALED INFORMATION AND DECEPTION.md",
     "Papers/2017 - Deception detection of EEG-P300 component classified by SVM method.md",
+    "Papers/2014 - Brain fingerprinting classification concealed information test detects US Navy military medical information with P300.md",
+    "Papers/2012 - Brain fingerprinting - a comprehensive tutorial review of detection of concealed information with event-related brain potentials.md",
     "Papers/2009 - A new approach for EEG feature extraction in P300-based lie detection.md",
+    "Papers/2008 - The Complex Trial Protocol (CTP) A new, countermeasure-resistant, accurate, P300-based method for detection of concealed information.md",
+    "Dictionary.md",
+    "Preprocessing/Preprocessing.md",
+    "Eksperyment/Dwa paradygmaty wykrywania ukrytej informacji.md",
+    "Eksperyment/CTP/CTP - Pipeline sesji - końcowy.md",
+    "Eksperyment/CTP/CTP - Pipeline - konfiguracja.md",
+    "Eksperyment/Classification CIT/20 naukowych standardów - Brain Fingerprinting (BF).md",
+    "Eksperyment/Classification CIT/Porady.md",
+    "Test statystyczny/Metoda BAD.md",
+    "Papers/2020-06 Brain fingerprinting field study on major, terrorist crimes - CIT with P300 and P300-MERMER.md",
     "Papers/Usuwanie artefaktów - podsumowanie.md",
-    "Papers/Niedostępne.md",
+    "Eksperyment/Classification CIT",
+    "Eksperyment/CTP",
     "Test statystyczny",
-    "Preprocessing/Methods used.md",
-    "Devices/Muse S Athena.md",
-    "Devices/Brainaccess.md",
     "Eksperyment",
     "Devices",
     "Preprocessing",

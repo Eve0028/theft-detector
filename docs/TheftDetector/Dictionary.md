@@ -45,11 +45,12 @@ Najczęściej bada się ją w tzw. **paradygmacie „oddball”**:
 To procedura w ramach P300-based CIT, w której przy braku wcześniejszej wiedzy o _probe_ identyfikuje się go jako bodziec wywołujący **największą średnią odpowiedź P300** u badanego (Imax), a następnie weryfikuje jego odróżnialność od bodźca z drugą co do wielkości reakcją.
 
 ---
-#### 3ST (Three-Stimulus Protocol)
-Był jednym z **wczesnych** protokołów P300-based CIT. Był to protokół trójbodźcowy, co oznacza, że używał trzech rodzajów bodźców w losowej kolejności w osobnych próbach:
+#### 3SP (Three-Stimulus Protocol)
+Był jednym z **wczesnych** protokołów P300-based CIT (nazywany też Comparison CIT). Był to protokół trójbodźcowy, co oznacza, że używał trzech rodzajów bodźców w losowej kolejności w osobnych próbach:
 • **Probe (P):** Rzadki bodziec zawierający utajnioną informację (np. narzędzie zbrodni).
 • **Irrelevant (I):** Częsty bodziec nieistotny (np. inne, nieużyteczne narzędzia).
-• **Target (T):** Rzadki bodziec celowy, wymagający unikalnej, zinstruowanej reakcji (np. naciśnięcia prawego przycisku). Pozostałe bodźce (P i I) wymagały innej reakcji (np. lewego przycisku)
+• **Target (T):** Rzadki bodziec celowy, wymagający unikalnej, zinstruowanej reakcji (np. naciśnięcia prawego przycisku). Pozostałe bodźce (P i I) wymagały innej reakcji (np. lewego przycisku).
+Był podatny na kontrmaneuwy. Często analizowany metodą **BAD**
 
 ---
 #### Complex Trial Protocol (CTP)
@@ -98,7 +99,11 @@ Celem było wyeliminowanie kilku słabości klasycznego CIT:
 - Kryterium:
     - Jeśli w **90% przypadków korelacja probe-target > probe-irrelevant**, uczestnik jest uznawany za „winnego”.
 
-Zazwyczaj gorsza wynikowo niż metoda **BAD**?
+---
+#### BCD (Bootstrapped Correlation Difference)
+Metoda ta wykorzystuje **korelację krzyżową** (double-centered correlation) pomiędzy przebiegami fal ERP:
+- Porównuje się korelację przebiegów P i T z korelacją przebiegów P i I.
+- Jeśli **korelacja P-T jest wyższa niż P-I** w 90% lub więcej iteracji bootstrappingu, badany jest klasyfikowany jako **posiadający wiedzę** (IPC)
 
 ---
 #### Klasyfikacyjny CIT (Classification CIT)
@@ -132,4 +137,4 @@ Ta metoda nie spełnia standardów BFSS i **ignoruje odpowiedzi na cele**. Używ
 | **BAD**                | **Bootstrapped Amplitude Difference** (jest to praktycznie to samo co **Comparison CIT**)        | Metoda wprowadzona przez Rosenfelda. Porównuje **amplitudę** odpowiedzi P300 na **sondy (Probes)** z amplitudą odpowiedzi na **bodźce nieistotne (Irrelevants)**. Jeżeli amplituda P > I z wysoką pewnością statystyczną (np. 90%), diagnozuje się obecność informacji (IP). Metoda ta **ignoruje** odpowiedzi na cele (Targets). | **Nie** spełnia naukowych standardów brain fingerprinting (BFSS).                  |
 | **BC–AD**              | **Bootstrapped Correlation Difference** (lub **Bootstrapped Correlation Analysis of Disparity**) | Metoda wprowadzona przez Farwella i Donchina. Porównuje **korelację** między falami ERP odpowiedzi na **sondy (Probes)** a **celami (Targets)**, z korelacją między sondami (Probes) a **bodźcami nieistotnymi (Irrelevants)**. Wysoka korelacja P-T w porównaniu do P-I wskazuje na obecność informacji (IP).                    | Metoda ta spełnia standardy BFSS i jest określana jako **Classification CIT**.     |
 | **Comparison CIT**     | Używa metody **BAD** lub jej wariantów.                                                          | Skupia się na pytaniu: **Czy odpowiedź na sondę jest znacząco większa niż na bodziec nieistotny?** (P > I). Nie używa odpowiedzi na cele jako wzorca dla informacji znanej.                                                                                                                                                       | **Nie** spełnia standardów BFSS (Standardy 13, 14, 17).                            |
-| **Classification CIT** | Używa metody **BC–AD** (lub podobnej korelacyjnej metody _bootstrappingu_).                      | Skupia się na pytaniu: **Czy wzorzec odpowiedzi na sondę jest bardziej podobny do wzorca odpowiedzi na cel, czy do wzorca odpowiedzi na bodziec nieistotny?**. Wykorzystuje odpowiedzi na cele (Targets) jako **wzorzec (template)** dla znanej, istotnej informacji.                                                             | **Tak** – to metodyka zgodna ze Standardami Naukowymi Brain Fingerprinting (BFSS). |
+| **Classification CIT** | Używa metody **BC–AD**, BCD (lub podobnej korelacyjnej metody _bootstrappingu_).                 | Skupia się na pytaniu: **Czy wzorzec odpowiedzi na sondę jest bardziej podobny do wzorca odpowiedzi na cel, czy do wzorca odpowiedzi na bodziec nieistotny?**. Wykorzystuje odpowiedzi na cele (Targets) jako **wzorzec (template)** dla znanej, istotnej informacji.                                                             | **Tak** – to metodyka zgodna ze Standardami Naukowymi Brain Fingerprinting (BFSS). |

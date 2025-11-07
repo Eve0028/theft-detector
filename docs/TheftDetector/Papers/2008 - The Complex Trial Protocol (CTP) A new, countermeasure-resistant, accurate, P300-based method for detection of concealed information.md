@@ -1,3 +1,5 @@
+Metoda: **Complex Trial Protocol (CTP)**
+
 Nowy protokół testu ukrytej informacji oparty na P300, nazwany **Complex Trial Protocol (CTP)**, został opracowany w celu zwiększenia dokładności i odporności na środki zaradcze (CMs) w porównaniu do starszych metod.
 
 **CTP** - ale z tymi samymi typami reakcji na S1 i S2.

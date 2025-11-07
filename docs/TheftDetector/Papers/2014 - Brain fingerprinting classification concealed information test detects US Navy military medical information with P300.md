@@ -1,3 +1,5 @@
+Metoda: **Classification CIT (BFP)** (porównanie do **Comparison CIT)
+
 Badanie 2014 koncentruje się na wykrywaniu **informacji nabytych w realnym życiu** – konkretnie **wiedzy medycznej wojskowej US Navy**. Badano 30 osób (16 ekspertów i 14 nie-ekspertów)
 
 Dostarcza bezpośrednich dowodów empirycznych z **tego samego zestawu danych**:
@@ -9,5 +11,7 @@ Dostarcza bezpośrednich dowodów empirycznych z **tego samego zestawu danych**:
 Porównano dwie metody analizy:
     ◦ Obie metody (P300 + LNP i P300 alone) dały **0% wskaźnika błędu**.
     ◦ Analiza **P300 + LNP** dała jednak **znacząco wyższą ufność statystyczną** niż analiza P300 alone (p<0.0001), średnio o 3.2% wyższą
+
+Metryką podobieństwa jest **korelacja dwucentryczna (double-centered correlation)**, która charakteryzuje całą formę fali, a nie tylko pojedynczą liczbę (jak amplituda).
 
 **Badanie** jawnie podaje, że zostało sfinansowane przez **US Central Intelligence Agency (CIA)** (Kontrakt nr 92-F138600-000). W badaniu uczestniczyli studenci i wykładowcy z Uniformed Services University of the Health Sciences (USUHS). Jeden ze współautorów (Drew C. Richardson) był w trakcie badań agentem FBI.

@@ -1,3 +1,4 @@
+Metody: **CTP, 3SP, Classification CIT (BCD/BAD)**
 ### Parametry analizy EEG: filtracja i amplituda
 
 "All studies by the present author utilize **mean amplitudes within 100‐ms segment**s. Also, although the study by Soskins et al. (2001) recorded the NEG wave using .3 Hz high‐pass filter settings, recent studies by the present author **utilize a .16 Hz setting, close to the .1 Hz** value urged by Tanner, Morgan‐Short, and Luck (2015) as “optimal for statistical power in detecting true effects while not introducing distortions.”
