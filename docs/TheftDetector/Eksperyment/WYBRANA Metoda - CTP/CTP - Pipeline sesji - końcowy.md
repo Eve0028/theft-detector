@@ -1,5 +1,5 @@
 ## Ustawienia ogólne
-- Sprzęt: Muse S Athena lub BrainAccess Standard Kit, PC z PsychoPy, LSL do wysyłania markerów.
+- Sprzęt: BrainAccess MINI.
 - Wejście uczestnika: klawiatura.
   - `Z` — odpowiedź na S1 (lewa ręka) — stała odpowiedź (wszyskie S1).
   - `M` — odpowiedź "target" na S2 (prawa ręka).
