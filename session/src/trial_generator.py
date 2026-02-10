@@ -106,6 +106,9 @@ class TrialGenerator:
             
             objects[obj_name].append(img_path)
         
+        self.logger.info(f"Grouped {len(image_paths)} images into {len(objects)} objects")
+        for obj_name, img_paths in objects.items():
+            self.logger.info(f"  {obj_name}: {len(img_paths)} images")
         return objects
     
     def _validate_inputs(self) -> None:

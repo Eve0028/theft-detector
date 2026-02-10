@@ -71,10 +71,11 @@ timing:
   
 # Trial Configuration
 trials:
-  total_trials: 25
-  num_blocks: 1
-  probe_repetitions: 5
-  irrelevant_repetitions: 5  # per irrelevant object
+  num_blocks: 2  # default: 5 blocks
+  probe_repetitions: 2  # default: 80
+  irrelevant_repetitions: 2  # default: 80 - per irrelevant object
+  # total_trials: 80 + 4 (irr_objects) * 80 = 400 trials in total
+  # 80 trials for one block
   target_proportion: 0.2  # 20% targets in S2
   
 # Stimuli Configuration
