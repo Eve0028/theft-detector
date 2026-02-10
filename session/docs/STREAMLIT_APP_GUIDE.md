@@ -358,13 +358,6 @@ Epoching page:
 
 ## Resources
 
-### Documentation
-
-- `scripts/README_ANALYZER_APP.md` - Full documentation
-- `docs/FIF_QUICK_REFERENCE.md` - FIF format guide
-- `docs/P300_ANALYSIS_EXPLAINED.md` - P300 theory
-- `docs/MNE_APP_REQUIREMENTS.md` - Technical specs
-
 ### Example Code
 
 - `scripts/example_mne_analysis.py` - CLI analysis pipeline

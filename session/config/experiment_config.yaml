@@ -13,7 +13,6 @@ eeg:
   
   # LSL Markers: Enable for sub-millisecond EEG synchronization
   # IMPORTANT: Set to 'true' for real sessions! BrainAccess Board must be running.
-  # See docs/LSL_MARKERS_GUIDE.md for setup instructions.
   send_markers: true  # true = send event markers, false = timestamps only
   
   # LSL marker stream (for behavioral events)
