@@ -68,7 +68,8 @@ def get_output_filename(
     output_dir: str,
     participant_id: str,
     session_id: int,
-    suffix: str = "behavioral"
+    suffix: str = "behavioral",
+    extension: str = "csv"
 ) -> str:
     """
     Generate output filename with timestamp.
@@ -83,6 +84,8 @@ def get_output_filename(
         Session number
     suffix : str, optional
         Filename suffix (default: "behavioral")
+    extension : str, optional
+        File extension without dot (default: "csv")
         
     Returns
     -------
@@ -94,7 +97,13 @@ def get_output_filename(
     
     # Generate filename
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"{participant_id}_S{session_id:02d}_{suffix}_{timestamp}.csv"
+    
+    # For MNE compatibility: suffix should be at END before extension
+    # e.g., P001_S01_20260203_193318_raw.fif (not P001_S01_raw_20260203.fif)
+    if suffix:
+        filename = f"{participant_id}_S{session_id:02d}_{timestamp}_{suffix}.{extension}"
+    else:
+        filename = f"{participant_id}_S{session_id:02d}_{timestamp}.{extension}"
     
     return os.path.join(output_dir, filename)
 

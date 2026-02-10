@@ -8,11 +8,46 @@ participant:
   
 # EEG Device Configuration
 eeg:
-  device_type: "none"  # Options: "brainaccess", "muse_s", "none"
+  device_type: "brainaccess"  # Options: "brainaccess", "muse_s", "none"
+  enabled: true  # Enable/disable EEG recording
+  
+  # LSL Markers: Enable for sub-millisecond EEG synchronization
+  # IMPORTANT: Set to 'true' for real sessions! BrainAccess Board must be running.
+  # See docs/LSL_MARKERS_GUIDE.md for setup instructions.
+  send_markers: true  # true = send event markers, false = timestamps only
+  
+  # LSL marker stream (for behavioral events)
   lsl_stream_name: "P300_CIT_Markers"
   lsl_stream_type: "Markers"
   lsl_stream_id: "p300cit001"
-  send_markers: false
+  
+  # BrainAccess specific settings
+  brainaccess:
+    device_stream_name: "BrainAccess"  # Name of BrainAccess LSL stream
+    
+    # Electrodes to record (must match physical cap positions)
+    channels:
+      - "Fz"   # Physically at Fz (using F3 cable, 25/30cm)
+      - "Cz"   # Physically at Cz (using C3 cable, 20cm)
+      - "Pz"   # Physically at Pz (using P3 cable, 15cm)
+    
+    # Custom electrode mapping (electrode_name -> channel_number)
+    # Default BrainAccess CAP mapping (based on cable lengths):
+    #   F3:0, F4:1, C3:2, C4:3, P3:4, P4:5, O1:6, O2:7
+    # Note: Fp1=REF, Fp2=BIAS (not recording channels)
+    #
+    # To use different positions, create custom mapping:
+    # channel_mapping:
+    #   "CustomName1": 0  # Connect to Channel 0 (F3 cable)
+    #   "CustomName2": 4  # Connect to Channel 4 (P3 cable)
+    channel_mapping:  # null = use default mapping
+      "Fz": 0   # F3 cable at Fz position
+      "Cz": 2   # C3 cable at Cz position
+      "Pz": 4   # P3 cable at Pz position
+    
+    sampling_rate: 250  # Hz
+    connection_timeout: 10.0  # seconds
+    buffer_size: 360  # seconds (1 hour)
   
 # Display Settings
 display:

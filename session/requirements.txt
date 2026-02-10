@@ -5,7 +5,13 @@
 psychopy
 psychtoolbox
 
-# LSL for EEG synchronization
+# BrainAccess official API
+brainaccess
+brainaccess-board
+
+mne
+
+# LSL for behavioral markers
 pylsl
 
 # Image processing
@@ -21,4 +27,13 @@ PyYAML
 
 # Utilities
 python-dateutil
+
+# Testing
+pytest
+pytest-mock
+
+# Interactive Analysis
+streamlit
+scipy
+matplotlib
 

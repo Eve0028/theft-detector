@@ -1,4 +1,4 @@
-# Protokół Badania: EEG-CIT (P300-BAD)
+# Protokół Badania: EEG-CTP (P300-BAD)
 
 **ID Uczestnika:** _________ | **Grupa:** [ ] Eksperymentalna (Z) [ ] Kontrolna (K) | **Data:** _________
 

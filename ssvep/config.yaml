@@ -1,0 +1,95 @@
+# SSVEP Demo - BrainAccess MINI (8 electrodes)
+# See session/docs/ELECTRODE_CONFIGURATIONS.md for cap layout.
+
+eeg:
+  # Electrodes to use. For SSVEP, occipital (O1, O2) are best.
+  channels:
+    - "O1"
+    - "O2"
+    - "Pz"
+  
+  # Custom mapping: electrode_name -> device channel number (0-7).
+  # Default BrainAccess CAP: F3:0, F4:1, C3:2, C4:3, P3:4, P4:5, O1:6, O2:7
+  channel_mapping:  # null = use default mapping
+    "O1": 6   # O1 cable at O1 position
+    "O2": 7   # O2 cable at O2 position
+    "Pz": 4   # P3 cable at Pz position
+
+  sampling_rate: 250
+  connection_timeout: 10.0
+  buffer_seconds: 60
+  # Scale factor for display/quality stats. Official BrainAccess API docs do not
+  # state whether callback data are in µV or raw ADC counts. If your values are
+  # in the millions, try ~0.000122 (empirical) to get µV-like scale; set 1.0 to keep as-is.
+  raw_to_uv_scale: 1.0
+
+# Signal quality check before main task (electrode contact, saturation)
+signal_check:
+  collect_seconds: 2.5
+  show_screen: true
+  # If true, apply same bandpass as preprocessing before computing mean/std/ptp.
+  # BrainAccess Viewer shows filtered (e.g. 1–30 Hz) signal, so filtered stats match it better.
+  filter_before_stats: true
+
+# Preprocessing (applied before SSVEP frequency detection)
+preprocessing:
+  bandpass_low_hz: 7.0
+  bandpass_high_hz: 20.0
+  filter_order: 4
+  # If true, subtract channel mean from each channel (common-average reference)
+  common_average_reference: false
+
+# SSVEP stimulus: three flickering targets + optional rest (static square)
+stimulus:
+  # Frequencies in Hz (within 3.5–75 Hz; avoid 50 Hz line noise)
+  frequency_left_hz: 10.0
+  frequency_center_hz: 12.5
+  frequency_right_hz: 14.28
+  # Rest state: when no target dominates (look at static square or away)
+  rest_enabled: true
+  # Analysis window length in seconds (longer = more stable, slower response)
+  analysis_window_seconds: 3.0
+  # Detection method: "fft" (power at frequency) or "cca" (Canonical Correlation Analysis)
+  detection_method: "cca"
+  # FFT method only:
+  frequency_tolerance_hz: 0.5
+  use_second_harmonic: true
+  # CCA method only: reference = sin/cos at f, 2f, ... (n_harmonics)
+  cca_n_harmonics: 2
+  cca_components: 1
+  cca_reg: 0.0001
+
+# User calibration: per-user rest threshold and baselines (improves rest vs target)
+calibration:
+  enabled: true
+  seconds_per_target: 8.0
+  rest_seconds: 3.0
+  # Rest threshold = rest_baseline_mean + rest_margin_std * rest_baseline_std
+  rest_margin_std: 1.5
+  # Optional: path to save/load calibration (e.g. calibration_user1.yaml)
+  save_path: null
+
+# Display (Pygame)
+display:
+  width: 1280
+  height: 720
+  fullscreen: false
+  # Monitor refresh rate (Hz). When set, flicker is synced to frames for stable SSVEP.
+  # Choose stimulus frequencies as sub-multiples of half refresh (e.g. 60 Hz -> 30, 15, 10, 7.5...).
+  refresh_rate_hz: 100
+  background_rgb: [30, 30, 35]
+  # Left, center, right square colors (RGB) when not "detected"; default white
+  square_color_left: [255, 255, 255]
+  square_color_center: [255, 255, 255]
+  square_color_right: [255, 255, 255]
+  # Rest square: static (no flicker), user looks here for "rest" state
+  rest_square_color: [90, 90, 90]
+  # Color when this target is detected from EEG (feedback)
+  detected_color: [100, 255, 140]
+  square_size_px: 120
+  # Flicker: alternate between color and black every half-period
+  flicker_black: true
+  # Power chart (F2 = separate window); frequency range for that chart
+  power_chart_freq_min: 5.0
+  power_chart_freq_max: 16.0
+  power_chart_step_hz: 0.5

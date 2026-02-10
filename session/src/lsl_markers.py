@@ -35,12 +35,24 @@ import time
 from typing import Optional, Dict, Any
 import logging
 
+# Try BrainAccess Board first (native for BrainAccess devices)
+try:
+    import brainaccess_board as bb
+    BRAINACCESS_BOARD_AVAILABLE = True
+except ImportError:
+    BRAINACCESS_BOARD_AVAILABLE = False
+
+# Fallback to generic pylsl
 try:
     from pylsl import StreamInfo, StreamOutlet
-    LSL_AVAILABLE = True
+    PYLSL_AVAILABLE = True
 except ImportError:
-    LSL_AVAILABLE = False
-    logging.warning("pylsl not available. LSL markers will not be sent.")
+    PYLSL_AVAILABLE = False
+
+LSL_AVAILABLE = BRAINACCESS_BOARD_AVAILABLE or PYLSL_AVAILABLE
+
+if not LSL_AVAILABLE:
+    logging.warning("Neither brainaccess_board nor pylsl available. LSL markers will not be sent.")
 
 
 class LSLMarkerSender:
@@ -75,10 +87,23 @@ class LSLMarkerSender:
         self.device_type = device_type.lower()
         self.enabled = enabled and LSL_AVAILABLE
         self.outlet: Optional[StreamOutlet] = None
+        self.ba_stimulation = None  # BrainAccess Board stimulation object
         self.marker_counter = 0
+        self.use_brainaccess_board = False
         
         # Initialize logger
         self.logger = logging.getLogger(__name__)
+        
+        # Decide which LSL backend to use
+        if self.device_type == "brainaccess" and BRAINACCESS_BOARD_AVAILABLE:
+            self.use_brainaccess_board = True
+            self.logger.info("Using brainaccess_board for LSL markers (native)")
+        elif PYLSL_AVAILABLE:
+            self.use_brainaccess_board = False
+            self.logger.info("Using pylsl for LSL markers (generic)")
+        else:
+            self.enabled = False
+            self.logger.error("No LSL backend available!")
         
         if self.enabled:
             self._initialize_stream()
@@ -91,34 +116,48 @@ class LSLMarkerSender:
     def _initialize_stream(self) -> None:
         """Initialize LSL outlet stream."""
         try:
-            # Create stream info
-            info = StreamInfo(
-                name=self.stream_name,
-                type=self.stream_type,
-                channel_count=1,
-                nominal_srate=0,  # Irregular sampling rate for markers
-                channel_format='string',
-                source_id=self.stream_id
-            )
-            
-            # Add metadata for device-specific configuration
-            channels = info.desc().append_child("channels")
-            channels.append_child("channel") \
-                .append_child_value("label", "Markers") \
-                .append_child_value("type", "Marker")
-            
-            info.desc().append_child_value("device_type", self.device_type)
-            info.desc().append_child_value("experiment", "P300_CIT")
-            
-            # Create outlet
-            self.outlet = StreamOutlet(info)
-            self.logger.info(
-                f"LSL stream initialized: {self.stream_name} "
-                f"(type: {self.stream_type}, device: {self.device_type})"
-            )
+            if self.use_brainaccess_board:
+                # Use BrainAccess Board native stimulation
+                self.ba_stimulation = bb.stimulation_connect(
+                    name=self.stream_name
+                )
+                self.logger.info(
+                    f"BrainAccess Board LSL stream initialized: {self.stream_name}"
+                )
+                self.logger.info(
+                    "NOTE: Make sure BrainAccess Board is running and "
+                    "the marker stream is connected in Board Configuration tab!"
+                )
+                
+            else:
+                # Use generic pylsl
+                info = StreamInfo(
+                    name=self.stream_name,
+                    type=self.stream_type,
+                    channel_count=1,
+                    nominal_srate=0,  # Irregular sampling rate for markers
+                    channel_format='string',
+                    source_id=self.stream_id
+                )
+                
+                # Add metadata for device-specific configuration
+                channels = info.desc().append_child("channels")
+                channels.append_child("channel") \
+                    .append_child_value("label", "Markers") \
+                    .append_child_value("type", "Marker")
+                
+                info.desc().append_child_value("device_type", self.device_type)
+                info.desc().append_child_value("experiment", "P300_CIT")
+                
+                # Create outlet
+                self.outlet = StreamOutlet(info)
+                self.logger.info(
+                    f"pylsl stream initialized: {self.stream_name} "
+                    f"(type: {self.stream_type}, device: {self.device_type})"
+                )
             
         except Exception as e:
-            self.logger.error(f"Failed to initialize LSL stream: {e}")
+            self.logger.error(f"Failed to initialize LSL stream: {e}", exc_info=True)
             self.enabled = False
     
     def send_marker(
@@ -144,7 +183,13 @@ class LSLMarkerSender:
         int
             Marker counter ID (0 if sending failed)
         """
-        if not self.enabled or self.outlet is None:
+        if not self.enabled:
+            return 0
+        
+        if self.use_brainaccess_board and self.ba_stimulation is None:
+            return 0
+        
+        if not self.use_brainaccess_board and self.outlet is None:
             return 0
         
         try:
@@ -157,17 +202,27 @@ class LSLMarkerSender:
                 metadata_str = ",".join([f"{k}={v}" for k, v in metadata.items()])
                 marker_str = f"{marker}|{metadata_str}"
             
-            # Send marker
-            if timestamp is None:
-                self.outlet.push_sample([marker_str])
+            # Send marker using appropriate backend
+            if self.use_brainaccess_board:
+                # BrainAccess Board: send as string
+                self.ba_stimulation.annotate(marker_str)
+                self.logger.debug(
+                    f"Sent marker #{self.marker_counter} [BA Board]: {marker_str}"
+                )
             else:
-                self.outlet.push_sample([marker_str], timestamp)
+                # pylsl: send with optional timestamp
+                if timestamp is None:
+                    self.outlet.push_sample([marker_str])
+                else:
+                    self.outlet.push_sample([marker_str], timestamp)
+                self.logger.debug(
+                    f"Sent marker #{self.marker_counter} [pylsl]: {marker_str}"
+                )
             
-            self.logger.debug(f"Sent marker #{self.marker_counter}: {marker_str}")
             return self.marker_counter
             
         except Exception as e:
-            self.logger.error(f"Failed to send marker '{marker}': {e}")
+            self.logger.error(f"Failed to send marker '{marker}': {e}", exc_info=True)
             return 0
     
     def send_trial_start(self, trial_num: int, block_num: int) -> int:
@@ -287,9 +342,17 @@ class LSLMarkerSender:
     
     def close(self) -> None:
         """Close LSL stream."""
-        if self.outlet is not None:
+        if self.use_brainaccess_board and self.ba_stimulation is not None:
             self.logger.info(
-                f"Closing LSL stream. Total markers sent: {self.marker_counter}"
+                f"Closing BrainAccess Board LSL stream. "
+                f"Total markers sent: {self.marker_counter}"
+            )
+            # BrainAccess Board stimulation object doesn't need explicit close
+            self.ba_stimulation = None
+        
+        if not self.use_brainaccess_board and self.outlet is not None:
+            self.logger.info(
+                f"Closing pylsl stream. Total markers sent: {self.marker_counter}"
             )
             self.outlet = None
     

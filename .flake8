@@ -1,0 +1,4 @@
+[flake8]
+# W293: blank line contains whitespace
+ignore = W293
+max-line-length = 120

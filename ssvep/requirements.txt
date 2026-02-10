@@ -1,0 +1,9 @@
+# SSVEP demo - standalone (BrainAccess MINI cap)
+# Python 3.10+
+
+brainaccess
+matplotlib
+numpy
+PyYAML
+pygame
+scipy

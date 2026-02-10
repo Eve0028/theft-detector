@@ -1,0 +1,195 @@
+# BrainAccess Electrode Configuration Presets
+# ==============================================
+# 
+# Quick reference configurations for different research needs.
+# Copy the relevant section to experiment_config.yaml
+#
+# Physical BrainAccess CAP positions (via cable length):
+#   REF: Fp1 (30/35cm) - Reference
+#   BIAS: Fp2 (30/35cm) - Bias
+#   Ch0: F3 (25/30cm), Ch1: F4 (25/30cm)
+#   Ch2: C3 (20cm), Ch3: C4 (20cm)
+#   Ch4: P3 (15cm), Ch5: P4 (15cm)
+#   Ch6: O1 (10cm), Ch7: O2 (10cm)
+
+# ------------------------------------------------------------------------------
+# PRESET 1: P300 CIT - Minimal (2 channels)
+# ------------------------------------------------------------------------------
+# Best for: Quick setup, minimal preparation time
+# Coverage: Primary P300 detection sites
+
+p300_minimal:
+  channels:
+    - "P3"  # Left parietal - primary P300
+    - "P4"  # Right parietal - primary P300
+  channel_mapping: null
+  sampling_rate: 250
+  buffer_size: 360
+
+# ------------------------------------------------------------------------------
+# PRESET 2: P300 CIT - Recommended (4 channels)
+# ------------------------------------------------------------------------------
+# Best for: Standard P300 CIT research
+# Coverage: Parietal + Central regions
+
+p300_recommended:
+  channels:
+    - "P3"  # Left parietal
+    - "P4"  # Right parietal
+    - "C3"  # Left central
+    - "C4"  # Right central
+  channel_mapping: null
+  sampling_rate: 250
+  buffer_size: 360
+
+# ------------------------------------------------------------------------------
+# PRESET 3: P300 CIT - Extended (6 channels)
+# ------------------------------------------------------------------------------
+# Best for: Comprehensive spatial coverage
+# Coverage: Frontal + Central + Parietal
+
+p300_extended:
+  channels:
+    - "F3"  # Left frontal
+    - "F4"  # Right frontal
+    - "C3"  # Left central
+    - "C4"  # Right central
+    - "P3"  # Left parietal
+    - "P4"  # Right parietal
+  channel_mapping: null
+  sampling_rate: 250
+  buffer_size: 360
+
+# ------------------------------------------------------------------------------
+# PRESET 4: Full Coverage (8 channels)
+# ------------------------------------------------------------------------------
+# Best for: Maximum data, exploratory research
+# Coverage: All available positions
+
+full_coverage:
+  channels:
+    - "F3"
+    - "F4"
+    - "C3"
+    - "C4"
+    - "P3"
+    - "P4"
+    - "O1"
+    - "O2"
+  channel_mapping: null
+  sampling_rate: 250
+  buffer_size: 360
+
+# ------------------------------------------------------------------------------
+# PRESET 5: Posterior Focus (4 channels)
+# ------------------------------------------------------------------------------
+# Best for: P300, visual ERPs
+# Coverage: Parietal + Occipital
+
+posterior_focus:
+  channels:
+    - "P3"  # Left parietal
+    - "P4"  # Right parietal
+    - "O1"  # Left occipital
+    - "O2"  # Right occipital
+  channel_mapping: null
+  sampling_rate: 250
+  buffer_size: 360
+
+# ------------------------------------------------------------------------------
+# PRESET 6: Virtual Midline (6 channels)
+# ------------------------------------------------------------------------------
+# Best for: Approximating midline positions (Fz, Cz, Pz)
+# Note: Average left-right in post-processing: Fz = (F3+F4)/2
+
+virtual_midline:
+  channels:
+    - "F3"  # Average F3+F4 for Fz
+    - "F4"
+    - "C3"  # Average C3+C4 for Cz
+    - "C4"
+    - "P3"  # Average P3+P4 for Pz
+    - "P4"
+  channel_mapping: null
+  sampling_rate: 250
+  buffer_size: 360
+
+# ------------------------------------------------------------------------------
+# PRESET 7: Custom Midline (Physical relocation)
+# ------------------------------------------------------------------------------
+# Best for: If you physically moved electrodes to midline positions
+# WARNING: Check cable lengths are sufficient!
+# Example: Using left-side cables for midline
+
+custom_midline:
+  channels:
+    - "Fz"   # Physically at Fz (using F3 cable, 25/30cm)
+    - "Cz"   # Physically at Cz (using C3 cable, 20cm)
+    - "Pz"   # Physically at Pz (using P3 cable, 15cm)
+    - "Oz"   # Physically at Oz (using O1 cable, 10cm)
+  channel_mapping:
+    "Fz": 0   # F3 cable at Fz position
+    "Cz": 2   # C3 cable at Cz position
+    "Pz": 4   # P3 cable at Pz position
+    "Oz": 6   # O1 cable at Oz position
+  sampling_rate: 250
+  buffer_size: 360
+
+# ------------------------------------------------------------------------------
+# PRESET 8: Left Hemisphere Only
+# ------------------------------------------------------------------------------
+# Best for: Language tasks, left lateralized effects
+
+left_hemisphere:
+  channels:
+    - "F3"
+    - "C3"
+    - "P3"
+    - "O1"
+  channel_mapping: null
+  sampling_rate: 250
+  buffer_size: 360
+
+# ------------------------------------------------------------------------------
+# PRESET 9: Right Hemisphere Only
+# ------------------------------------------------------------------------------
+# Best for: Spatial tasks, right lateralized effects
+
+right_hemisphere:
+  channels:
+    - "F4"
+    - "C4"
+    - "P4"
+    - "O2"
+  channel_mapping: null
+  sampling_rate: 250
+  buffer_size: 360
+
+# ------------------------------------------------------------------------------
+# HOW TO USE
+# ------------------------------------------------------------------------------
+# 
+# 1. Choose a preset from above
+# 2. Copy the channels and channel_mapping sections
+# 3. Paste into config/experiment_config.yaml under eeg.brainaccess
+#
+# Example:
+#
+# eeg:
+#   device_type: "brainaccess"
+#   enabled: true
+#   send_markers: true
+#   
+#   brainaccess:
+#     channels:
+#       - "P3"
+#       - "P4"
+#       - "C3"
+#       - "C4"
+#     channel_mapping: null
+#     sampling_rate: 250
+#     connection_timeout: 10.0
+#     buffer_size: 360
+#
+# ------------------------------------------------------------------------------
+

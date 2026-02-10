@@ -24,23 +24,22 @@ import argparse
 import time
 import csv
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 import yaml
 import numpy as np
-from psychopy import visual, core, event, gui, data, monitors
+from psychopy import visual, core, event
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent))
 
 from trial_generator import TrialGenerator
 from lsl_markers import LSLMarkerSender
+from brainaccess_handler import BrainAccessHandler
 from utils import (
     setup_logging,
     get_output_filename,
     find_image_files,
-    validate_responses,
-    format_break_time,
     get_timestamp
 )
 
@@ -62,6 +61,7 @@ class P300_CIT_Experiment:
         # Initialize components
         self.window: Optional[visual.Window] = None
         self.lsl_sender: Optional[LSLMarkerSender] = None
+        self.eeg_handler: Optional[BrainAccessHandler] = None
         self.logger = None
         self.trial_list: List[Dict] = []
         self.data_file = None
@@ -116,6 +116,46 @@ class P300_CIT_Experiment:
             )
         else:
             self.lsl_sender = LSLMarkerSender(enabled=False)
+        
+        # Initialize BrainAccess EEG handler
+        if self.config['eeg']['enabled'] and self.config['eeg']['device_type'] == 'brainaccess':
+            ba_config = self.config['eeg']['brainaccess']
+            self.eeg_handler = BrainAccessHandler(
+                channels=ba_config['channels'],
+                channel_mapping=ba_config.get('channel_mapping'),
+                sampling_rate=ba_config['sampling_rate'],
+                buffer_size=ba_config['buffer_size'],
+                enabled=True,
+                verbose=False  # Production mode - minimal logging overhead
+            )
+            
+            # Try to connect to device
+            self.logger.info("Connecting to BrainAccess device...")
+            if self.eeg_handler.connect():
+                self.logger.info("BrainAccess device ready")
+                
+                # Check signal quality (wait for buffer to fill)
+                self.logger.info("Collecting data for signal quality check...")
+                time.sleep(3)  # Wait for data (need 250 samples = 1s @ 250Hz)
+                
+                # Check buffer size
+                buffer_samples = len(self.eeg_handler.eeg_data)
+                self.logger.info(f"Buffer has {buffer_samples} samples")
+                
+                quality = self.eeg_handler.get_signal_quality()
+                self.logger.info(f"Signal quality: {quality}")
+                
+                for ch, q in quality.items():
+                    if q == 'poor':
+                        self.logger.warning(f"Poor signal quality on channel {ch}")
+            else:
+                self.logger.error(
+                    "Failed to connect to BrainAccess device. "
+                    "Make sure BrainAccess Board is running."
+                )
+                # Continue anyway - user can retry
+        else:
+            self.eeg_handler = BrainAccessHandler(enabled=False)
         
         # Create PsychoPy window
         self.logger.info("Creating display window...")
@@ -246,6 +286,37 @@ class P300_CIT_Experiment:
         self.data_writer = csv.DictWriter(self.data_file, fieldnames=fieldnames)
         self.data_writer.writeheader()
         self.data_file.flush()
+        
+        # Marker counter for behavioral CSV
+        self.marker_counter = 0
+    
+    def _send_marker(self, marker: str) -> int:
+        """
+        Send marker using optimal method:
+        1. Native BrainAccess SDK annotation (fast, <0.1ms)
+        2. Optional LSL for Board recording (if enabled)
+        
+        Parameters
+        ----------
+        marker : str
+            Marker string (e.g., "S1_onset_probe|trial=1")
+            
+        Returns
+        -------
+        int
+            Marker sequence number for behavioral CSV
+        """
+        self.marker_counter += 1
+        
+        # Send to BrainAccess SDK (native, always if connected)
+        if self.eeg_handler and self.eeg_handler.is_connected:
+            self.eeg_handler.annotate(marker)
+        
+        # Send to LSL (optional, for Board app recording)
+        if self.lsl_sender and self.lsl_sender.enabled:
+            self.lsl_sender.send_marker(marker)
+        
+        return self.marker_counter
     
     def run(self) -> None:
         """Run the complete experiment."""
@@ -256,6 +327,25 @@ class P300_CIT_Experiment:
             # Show main task instructions
             self._show_instructions('main_task')
             
+            # Start EEG recording
+            if self.eeg_handler and self.eeg_handler.is_connected:
+                eeg_output_dir = os.path.join(
+                    self.config['output']['data_directory'],
+                    'eeg'
+                )
+                eeg_filename = get_output_filename(
+                    eeg_output_dir,
+                    self.config['participant']['id'],
+                    self.config['participant']['session'],
+                    suffix='raw',  # MNE convention: *_raw.fif
+                    extension='fif'  # FIF format with embedded annotations
+                )
+                
+                if self.eeg_handler.start_recording(eeg_filename):
+                    self.logger.info(f"EEG recording started: {eeg_filename}")
+                else:
+                    self.logger.error("Failed to start EEG recording")
+            
             # Run all blocks
             for block in range(1, self.config['trials']['num_blocks'] + 1):
                 self._run_block(block)
@@ -263,6 +353,11 @@ class P300_CIT_Experiment:
                 # Break between blocks (except after last block)
                 if block < self.config['trials']['num_blocks']:
                     self._show_block_break(block)
+            
+            # Stop EEG recording
+            if self.eeg_handler and self.eeg_handler.is_recording:
+                self.eeg_handler.stop_recording()
+                self.logger.info("EEG recording stopped")
             
             # Show end message
             self._show_instructions('end')
@@ -288,7 +383,7 @@ class P300_CIT_Experiment:
         self.logger.info(f"Starting block {block_num}")
         
         # Send block start marker
-        self.lsl_sender.send_block_start(block_num)
+        self._send_marker(f"block_start|block={block_num}")
         
         # Get trials for this block
         block_trials = [t for t in self.trial_list if t['block'] == block_num]
@@ -303,7 +398,7 @@ class P300_CIT_Experiment:
                 raise KeyboardInterrupt("User quit")
         
         # Send block end marker
-        self.lsl_sender.send_block_end(block_num)
+        self._send_marker(f"block_end|block={block_num}")
         
         self.logger.info(f"Block {block_num} complete")
     
@@ -346,7 +441,10 @@ class P300_CIT_Experiment:
         fixation_onset = self.clock.getTime()
         trial_data['fixation_onset_time'] = fixation_onset
         
-        marker_id = self.lsl_sender.send_fixation_onset(trial_num)
+        # Send annotation (native SDK + optional LSL)
+        marker_id = self._send_marker(
+            f"fixation_onset|trial={trial_num}"
+        )
         trial_data['LSL_fixation_marker'] = marker_id
         
         self.fixation.draw()
@@ -367,10 +465,8 @@ class P300_CIT_Experiment:
         self.image_stim.size = None  # Use image native size
         self.image_stim.size = img_height  # Set height, width auto-calculated
         
-        marker_id = self.lsl_sender.send_s1_onset(
-            trial_num,
-            trial['s1_type'],
-            trial['s1_object']
+        marker_id = self._send_marker(
+            f"S1_onset_{trial['s1_type']}|trial={trial_num},stim_id={trial['s1_object']}"
         )
         trial_data['LSL_S1_marker'] = marker_id
         
@@ -406,10 +502,8 @@ class P300_CIT_Experiment:
                 s1_rt = keys[0][1]
                 
                 # Send S1 response marker
-                marker_id = self.lsl_sender.send_s1_response(
-                    trial_num,
-                    s1_response,
-                    s1_rt
+                marker_id = self._send_marker(
+                    f"S1_response|trial={trial_num},key={s1_response},rt={s1_rt:.4f}"
                 )
                 trial_data['LSL_S1_response_marker'] = marker_id
             
@@ -425,9 +519,8 @@ class P300_CIT_Experiment:
         
         self.text_stim.setText(trial['s2_string'])
         
-        marker_id = self.lsl_sender.send_s2_onset(
-            trial_num,
-            trial['s2_type']
+        marker_id = self._send_marker(
+            f"S2_onset_{trial['s2_type']}|trial={trial_num}"
         )
         trial_data['LSL_S2_marker'] = marker_id
         
@@ -471,11 +564,8 @@ class P300_CIT_Experiment:
                 s2_correct = (s2_response == self.config['keys']['s2_nontarget'])
             
             # Send S2 response marker
-            marker_id = self.lsl_sender.send_s2_response(
-                trial_num,
-                s2_response,
-                s2_rt,
-                s2_correct
+            marker_id = self._send_marker(
+                f"S2_response|trial={trial_num},key={s2_response},rt={s2_rt:.4f},correct={int(s2_correct)}"
             )
             trial_data['LSL_S2_response_marker'] = marker_id
         
@@ -490,7 +580,7 @@ class P300_CIT_Experiment:
         )
         trial_data['ITI_duration'] = iti_duration
         
-        marker_id = self.lsl_sender.send_iti_start(trial_num)
+        marker_id = self._send_marker(f"ITI_start|trial={trial_num}")
         trial_data['LSL_ITI_marker'] = marker_id
         
         core.wait(iti_duration)
@@ -555,6 +645,10 @@ class P300_CIT_Experiment:
         # Close data file
         if self.data_file:
             self.data_file.close()
+        
+        # Disconnect EEG device
+        if self.eeg_handler:
+            self.eeg_handler.disconnect()
         
         # Close LSL sender
         if self.lsl_sender:

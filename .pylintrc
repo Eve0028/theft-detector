@@ -1,0 +1,6 @@
+[MESSAGES CONTROL]
+# C0303: trailing-whitespace
+disable = C0303
+
+[FORMAT]
+max-line-length = 120

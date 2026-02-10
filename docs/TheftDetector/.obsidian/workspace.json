@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "Eksperyment/Channels - Setup.md",
+                "file": "Dokumenty - do druku/Mail do uczestników - przed badaniem.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "Channels - Setup"
+              "title": "Mail do uczestników - przed badaniem"
             }
           }
         ]
@@ -78,7 +78,7 @@
       }
     ],
     "direction": "horizontal",
-    "width": 397.5
+    "width": 441.5
   },
   "right": {
     "id": "c42556c924340d78",
@@ -171,34 +171,34 @@
   },
   "active": "e313839c371b465c",
   "lastOpenFiles": [
-    "Eksperyment/Dwa paradygmaty wykrywania ukrytej informacji.md",
-    "Eksperyment/Channels - Setup.md",
-    "Eksperyment/Opis badania.md",
-    "Dokumenty - do druku/Dla uczestnika - Ankieta wstępna.md",
-    "Dokumenty - do druku/Dla badacza - Rzeczy do wzięcia.md",
-    "Dokumenty - do druku/Dla badacza - Instrukcja.md",
-    "Dokumenty - do druku/Dla uczestnika - Debriefing.md",
-    "Dokumenty - do druku/Mail do uczestników - przed badaniem.md",
     "Dokumenty - do druku/Dla uczestnika - Informacje i zgoda na badania.md",
+    "Dokumenty - do druku/Dla badacza - Instrukcja.md",
+    "Dokumenty - do druku/Dla badacza - Rzeczy do wzięcia.md",
+    "Dokumenty - do druku/Dla uczestnika - Ankieta wstępna.md",
+    "Dokumenty - do druku/Dla uczestnika - Debriefing.md",
     "Dokumenty - do druku/Dla uczestnika - Exit survey.md",
-    "Dokumenty - do druku/Dla uczestnika - Instrukcja.md",
+    "Eksperyment/Dwa paradygmaty wykrywania ukrytej informacji.md",
+    "Dokumenty - do druku/Mail do uczestników - przed badaniem.md",
     "Devices/Brainaccess - WYBRANY.md",
     "Eksperyment/WYBRANA Metoda - CTP/CTP - Pipeline sesji - końcowy.md",
+    "Papers/2020 - Evidence of memory from brain data.md",
+    "Papers/Usuwanie artefaktów - podsumowanie.md",
+    "Papers/2025-09 Improving Electroencephalogram-Based Deception Detection in CIT under LSH.md",
+    "Papers/2025-05 - Decoding deception with the P300 - A meta-analysis of the Concealed Information Test.md",
+    "Papers/2025-04 - Neurophysiological Approaches to Lie Detection - A Systematic Review.md",
+    "Papers/2022-02 - Detection of concealed knowledge via the ERP-based - Real-life and real-crime.md",
+    "Papers/2022 - EEG-based lie detection using ERP P300 in response to known and unknown faces - An overview.md",
+    "Papers/2022 - Brain fingerprinting field study on major, terrorist crimes supports the brain fingerprinting scientific standards hypothesis.md",
+    "Papers/2019 - REVIEW - P300 in detecting concealed information and deception.md",
+    "Papers/2019 - Item Roles Explored in a Modified P300-Based CTP Concealed Information Test.md",
+    "Papers/2018 - BOOK - DETECTING CONCEALED INFORMATION AND DECEPTION.md",
+    "Papers/2008 - The Complex Trial Protocol (CTP) A new, countermeasure-resistant, accurate, P300-based method for detection of concealed information.md",
+    "Papers/2012 - Brain fingerprinting - a comprehensive tutorial review of detection of concealed information with event-related brain potentials.md",
+    "Papers/2009 - A new approach for EEG feature extraction in P300-based lie detection.md",
+    "Test statystyczny/Metoda BAD.md",
     "Eksperyment/WYBRANA Metoda - CTP/CTP - Pipeline - konfiguracja.md",
     "Pasted image 20260109172244.png",
-    "Dictionary.md",
-    "Test statystyczny/Metoda BAD.md",
-    "Preprocessing/Preprocessing.md",
-    "Preprocessing/Preprocessing - Muse.md",
-    "Project description.md",
-    "Eksperyment/Metoda - Classification CIT/Porady.md",
-    "Eksperyment/Metoda - Classification CIT/20 naukowych standardów - Brain Fingerprinting (BF).md",
-    "Devices/Muse S Athena.md",
-    "Devices/Muse S Athena - AUX electrodes.md",
     "Dokumenty - do druku",
-    "Papers/2025-05 - Decoding deception with the P300 - A meta-analysis of the Concealed Information Test.md",
-    "Papers/2025-09 Improving Electroencephalogram-Based Deception Detection in CIT under LSH.md",
-    "Papers/2025-04 - Neurophysiological Approaches to Lie Detection - A Systematic Review.md",
     "Eksperyment/Metoda - Classification CIT",
     "Eksperyment/WYBRANA Metoda - CTP",
     "Test statystyczny",

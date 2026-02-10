@@ -1,4 +1,4 @@
-# Ankieta końcowa: Badanie EEG-CIT
+# Ankieta końcowa: Badanie EEG-CTP
 
 **ID Uczestnika:** _________
 
