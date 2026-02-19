@@ -32,6 +32,8 @@ Usage:
 
 Documentation:
     - docs/STREAMLIT_APP_GUIDE.md - Quick start guide
+    - scripts/README_ANALYZER_APP.md - Full documentation
+    - docs/CTP_BAD_METHOD.md - CTP-BAD method details
 
 """
 
@@ -294,44 +296,141 @@ def create_epochs(raw, events, event_id, tmin, tmax, baseline, reject_threshold_
     return epochs
 
 
-def compute_erps(epochs):
+def adaptive_reject_epochs(epochs, method="iqr", k=3.0):
     """
-    Compute ERPs for probe and irrelevant conditions.
-    
+    Remove artifact epochs using statistical outlier detection.
+
+    Computes the per-epoch peak-to-peak amplitude (worst channel) and rejects
+    epochs whose amplitude is a statistical outlier.
+
     Parameters
     ----------
     epochs : mne.Epochs
-        Epoched data
-        
+        Input epochs (not modified in-place).
+    method : str
+        Detection method: ``"iqr"``, ``"zscore"``.
+    k : float
+        Sensitivity parameter:
+        - IQR: reject epochs with amplitude > Q3 + k×IQR (typical 2.5–4.0).
+        - Z-score: reject epochs with amplitude z-score > k (typical 2.5–3.5).
+
     Returns
     -------
-    probe_erp : mne.Evoked or None
-        Probe ERP
-    irrelevant_erp : mne.Evoked or None
-        Irrelevant ERP
+    tuple
+        ``(clean_epochs, n_dropped, ptp_per_epoch, keep_mask)``
+    """
+    data = epochs.get_data() * 1e6          # (n_epochs, n_channels, n_times) µV
+    ptp = np.ptp(data, axis=2)              # (n_epochs, n_channels)
+    ptp_max = ptp.max(axis=1)               # worst channel per epoch
+
+    if method == "iqr":
+        q1, q3 = np.percentile(ptp_max, [25, 75])
+        upper = q3 + k * (q3 - q1)
+        keep_mask = ptp_max <= upper
+    else:  # zscore
+        z = (ptp_max - ptp_max.mean()) / (ptp_max.std() + 1e-10)
+        keep_mask = z <= k
+
+    n_dropped = int((~keep_mask).sum())
+    clean_epochs = epochs[keep_mask]
+    return clean_epochs, n_dropped, ptp_max, keep_mask
+
+
+def extract_stim_ids(event_id: dict) -> list:
+    """
+    Extract unique stimulus object names from event annotations.
+
+    Parses ``stim_id=<name>`` fields embedded in annotation strings such as
+    ``S1_onset_probe|trial=1,stim_id=wolf``.
+
+    Parameters
+    ----------
+    event_id : dict
+        MNE event_id mapping.
+
+    Returns
+    -------
+    list of str
+        Sorted list of unique stim_id values, e.g. ``['bear', 'dog', 'wolf']``.
+    """
+    stim_ids = set()
+    for key in event_id:
+        if 'stim_id=' not in key:
+            continue
+        idx = key.index('stim_id=') + len('stim_id=')
+        val = key[idx:]
+        for sep in (',', '|', ' '):
+            if sep in val:
+                val = val[:val.index(sep)]
+        stim_ids.add(val.strip())
+    return sorted(stim_ids)
+
+
+def compute_erps(epochs, target_stim=None, baseline_stims=None, channels=None):
+    """
+    Compute ERPs for target vs baseline conditions.
+
+    Parameters
+    ----------
+    epochs : mne.Epochs
+        Epoched data.
+    target_stim : str or None
+        Label for the target condition.  ``None`` or ``'probe'`` selects all
+        probe events.  Any stim_id string (e.g. ``'wolf'``) selects epochs
+        annotated with ``stim_id=wolf``.
+    baseline_stims : list of str or None
+        stim_id labels for baseline epochs.  ``None`` defaults to all
+        irrelevant events.
+    channels : list of str or None
+        Channel subset for the returned Evoked objects.  ``None`` uses all.
+
+    Returns
+    -------
+    tuple
+        ``(target_erp, baseline_erp, target_events, baseline_events)``
     """
     available_events = list(epochs.event_id.keys())
-    
-    # Find probe and irrelevant events
-    probe_events = [k for k in available_events 
-                   if 'probe' in k.lower() and 's1_onset' in k.lower()]
-    irrelevant_events = [k for k in available_events 
-                        if 'irrelevant' in k.lower() and 's1_onset' in k.lower()]
-    
-    probe_erp = None
-    irrelevant_erp = None
-    
-    if probe_events:
-        probe_epochs = epochs[probe_events]
-        if len(probe_epochs) > 0:
-            probe_erp = probe_epochs.average()
-    
-    if irrelevant_events:
-        irrelevant_epochs = epochs[irrelevant_events]
-        if len(irrelevant_epochs) > 0:
-            irrelevant_erp = irrelevant_epochs.average()
-    
-    return probe_erp, irrelevant_erp, probe_events, irrelevant_events
+
+    # Resolve target events
+    if target_stim is None or target_stim == 'probe':
+        target_events = [k for k in available_events
+                         if 'probe' in k.lower() and 's1_onset' in k.lower()]
+    else:
+        target_events = [k for k in available_events
+                         if f'stim_id={target_stim}' in k
+                         and 's1_onset' in k.lower()]
+
+    # Resolve baseline events
+    if not baseline_stims:
+        baseline_events = [k for k in available_events
+                           if 'irrelevant' in k.lower() and 's1_onset' in k.lower()]
+    else:
+        baseline_events = []
+        for stim in baseline_stims:
+            baseline_events += [k for k in available_events
+                                 if f'stim_id={stim}' in k
+                                 and 's1_onset' in k.lower()]
+        # Deduplicate while preserving order
+        seen: set = set()
+        baseline_events = [x for x in baseline_events
+                           if not (x in seen or seen.add(x))]  # type: ignore[func-returns-value]
+
+    target_erp = None
+    baseline_erp = None
+
+    ep = epochs.copy().pick_channels(channels) if channels else epochs
+
+    if target_events:
+        t_ep = ep[target_events]
+        if len(t_ep) > 0:
+            target_erp = t_ep.average()
+
+    if baseline_events:
+        b_ep = ep[baseline_events]
+        if len(b_ep) > 0:
+            baseline_erp = b_ep.average()
+
+    return target_erp, baseline_erp, target_events, baseline_events
 
 
 def analyze_p300(probe_erp, irrelevant_erp, tmin=0.3, tmax=0.6):
@@ -393,95 +492,113 @@ def analyze_p300(probe_erp, irrelevant_erp, tmin=0.3, tmax=0.6):
     return pd.DataFrame(results)
 
 
-def ctp_bad_analysis(epochs, tmin=0.3, tmax=0.6, n_bootstrap=1000, threshold=0.90):
+def ctp_bad_analysis(
+    epochs,
+    tmin=0.3,
+    tmax=0.6,
+    n_bootstrap=1000,
+    threshold=0.90,
+    channels=None,
+    target_stim=None,
+    baseline_stims=None,
+):
     """
     Perform CTP-BAD (Bootstrap Amplitude Difference) analysis.
-    
-    This method uses bootstrap resampling to determine if a participant
-    shows recognition of the probe stimulus (guilty) or not (innocent).
-    
+
     Parameters
     ----------
     epochs : mne.Epochs
-        Epoched data containing probe and irrelevant trials
+        Epoched data.
     tmin : float
-        Analysis window start (seconds)
+        Analysis window start (seconds).
     tmax : float
-        Analysis window end (seconds)
+        Analysis window end (seconds).
     n_bootstrap : int
-        Number of bootstrap iterations (default: 1000)
+        Bootstrap iterations.
     threshold : float
-        Classification threshold (default: 0.90 = 90%)
-        
+        Guilty classification threshold (default 0.90).
+    channels : list of str or None
+        Channel subset for analysis.  ``None`` uses all channels.
+    target_stim : str or None
+        Target stim_id (or ``None``/``'probe'`` for default probe events).
+    baseline_stims : list of str or None
+        Baseline stim_id list.  ``None`` defaults to all irrelevant events.
+
     Returns
     -------
     dict
-        Results containing:
-        - channel_results: per-channel bootstrap proportions and classifications
-        - overall_classification: final verdict (guilty/innocent)
-        - bootstrap_proportions: proportion for each channel
+        Per-channel bootstrap results and overall classification.
     """
-    # Get epoch data
     available_events = list(epochs.event_id.keys())
-    probe_events = [k for k in available_events 
-                   if 'probe' in k.lower() and 's1_onset' in k.lower()]
-    irrelevant_events = [k for k in available_events 
-                        if 'irrelevant' in k.lower() and 's1_onset' in k.lower()]
-    
-    if not probe_events or not irrelevant_events:
-        raise ValueError("Could not find probe/irrelevant events in epochs")
-    
-    # Extract probe and irrelevant epochs
-    probe_epochs = epochs[probe_events]
-    irrelevant_epochs = epochs[irrelevant_events]
-    
-    # Get time mask for analysis window
+
+    # Resolve target events
+    if target_stim is None or target_stim == 'probe':
+        target_events = [k for k in available_events
+                         if 'probe' in k.lower() and 's1_onset' in k.lower()]
+    else:
+        target_events = [k for k in available_events
+                         if f'stim_id={target_stim}' in k
+                         and 's1_onset' in k.lower()]
+
+    # Resolve baseline events
+    if not baseline_stims:
+        baseline_events = [k for k in available_events
+                           if 'irrelevant' in k.lower() and 's1_onset' in k.lower()]
+    else:
+        baseline_events = []
+        for stim in baseline_stims:
+            baseline_events += [k for k in available_events
+                                 if f'stim_id={stim}' in k
+                                 and 's1_onset' in k.lower()]
+
+    if not target_events or not baseline_events:
+        raise ValueError(
+            f"Could not find target ({target_stim or 'probe'}) or baseline events. "
+            f"Available: {available_events[:5]}"
+        )
+
+    target_epochs = epochs[target_events]
+    baseline_epochs = epochs[baseline_events]
+
     times = epochs.times
     time_mask = (times >= tmin) & (times <= tmax)
-    
-    # Get epoch data (n_epochs, n_channels, n_times)
-    probe_data = probe_epochs.get_data() * 1e6  # Convert to µV
-    irrelevant_data = irrelevant_epochs.get_data() * 1e6
-    
-    # Extract data in analysis window and compute mean amplitude per epoch
-    # probe_amplitudes: (n_probe_epochs, n_channels)
-    probe_amplitudes = probe_data[:, :, time_mask].mean(axis=2)
-    irrelevant_amplitudes = irrelevant_data[:, :, time_mask].mean(axis=2)
-    
-    n_probe = probe_amplitudes.shape[0]
-    n_irrelevant = irrelevant_amplitudes.shape[0]
-    n_channels = probe_amplitudes.shape[1]
-    
-    # Bootstrap analysis per channel
+
+    # Channel subset via index — no copy needed
+    all_ch = list(epochs.ch_names)
+    if channels:
+        ch_names_to_use = [ch for ch in channels if ch in all_ch]
+        ch_indices = np.array([all_ch.index(ch) for ch in ch_names_to_use])
+    else:
+        ch_names_to_use = all_ch
+        ch_indices = np.arange(len(all_ch))
+
+    # (n_epochs, n_channels_total, n_times) → subset → mean over time window
+    target_data = target_epochs.get_data() * 1e6
+    baseline_data = baseline_epochs.get_data() * 1e6
+
+    target_amp = target_data[:, ch_indices, :][:, :, time_mask].mean(axis=2)
+    baseline_amp = baseline_data[:, ch_indices, :][:, :, time_mask].mean(axis=2)
+
+    n_target = target_amp.shape[0]
+    n_baseline = baseline_amp.shape[0]
+
     channel_results = []
     bootstrap_proportions = []
-    
-    for ch_idx, ch_name in enumerate(epochs.ch_names):
-        # Get amplitudes for this channel
-        probe_ch = probe_amplitudes[:, ch_idx]  # (n_probe,)
-        irrelevant_ch = irrelevant_amplitudes[:, ch_idx]  # (n_irrelevant,)
-        
-        # Bootstrap resampling
-        count_probe_greater = 0
-        
-        for _ in range(n_bootstrap):
-            # Randomly sample with replacement
-            probe_sample = np.random.choice(probe_ch, size=n_probe, replace=True)
-            irrelevant_sample = np.random.choice(irrelevant_ch, size=n_irrelevant, replace=True)
-            
-            # Compute means
-            probe_mean = probe_sample.mean()
-            irrelevant_mean = irrelevant_sample.mean()
-            
-            # Check if probe > irrelevant
-            if probe_mean > irrelevant_mean:
-                count_probe_greater += 1
-        
-        # Calculate proportion
-        proportion = count_probe_greater / n_bootstrap
+    target_label = target_stim if target_stim else "probe"
+
+    for ch_idx, ch_name in enumerate(ch_names_to_use):
+        target_ch = target_amp[:, ch_idx]
+        baseline_ch = baseline_amp[:, ch_idx]
+
+        count_target_greater = sum(
+            np.random.choice(target_ch, size=n_target, replace=True).mean()
+            > np.random.choice(baseline_ch, size=n_baseline, replace=True).mean()
+            for _ in range(n_bootstrap)
+        )
+
+        proportion = count_target_greater / n_bootstrap
         bootstrap_proportions.append(proportion)
-        
-        # Classify
+
         if proportion >= threshold:
             classification = "Guilty"
             status = "🔴"
@@ -489,36 +606,37 @@ def ctp_bad_analysis(epochs, tmin=0.3, tmax=0.6, n_bootstrap=1000, threshold=0.9
         else:
             classification = "Innocent"
             status = "🟢"
-            if proportion <= 0.60:
-                confidence = "High"
-            elif proportion <= 0.75:
-                confidence = "Moderate"
-            else:
-                confidence = "Low"
-        
+            confidence = "High" if proportion <= 0.60 else (
+                "Moderate" if proportion <= 0.75 else "Low"
+            )
+
         channel_results.append({
             'Channel': ch_name,
             'Status': status,
             'Bootstrap %': f"{proportion * 100:.1f}%",
             'Classification': classification,
             'Confidence': confidence,
-            'Probe > Irr': f"{count_probe_greater}/{n_bootstrap}"
+            'Target > Baseline': f"{count_target_greater}/{n_bootstrap}",
         })
-    
-    # Overall classification (majority vote or max proportion)
+
     max_proportion = max(bootstrap_proportions)
-    max_channel_idx = bootstrap_proportions.index(max_proportion)
-    max_channel = epochs.ch_names[max_channel_idx]
-    
+    max_channel = ch_names_to_use[bootstrap_proportions.index(max_proportion)]
+
     if max_proportion >= threshold:
         overall_classification = "GUILTY"
         overall_status = "🔴"
-        verdict = f"Participant likely recognized the probe stimulus (max: {max_proportion*100:.1f}% at {max_channel})"
+        verdict = (
+            f"Participant likely recognized '{target_label}' "
+            f"(max: {max_proportion*100:.1f}% at {max_channel})"
+        )
     else:
         overall_classification = "INNOCENT"
         overall_status = "🟢"
-        verdict = f"No clear recognition of probe stimulus (max: {max_proportion*100:.1f}% at {max_channel})"
-    
+        verdict = (
+            f"No clear recognition of '{target_label}' "
+            f"(max: {max_proportion*100:.1f}% at {max_channel})"
+        )
+
     return {
         'channel_results': pd.DataFrame(channel_results),
         'overall_classification': overall_classification,
@@ -527,10 +645,11 @@ def ctp_bad_analysis(epochs, tmin=0.3, tmax=0.6, n_bootstrap=1000, threshold=0.9
         'bootstrap_proportions': bootstrap_proportions,
         'max_proportion': max_proportion,
         'max_channel': max_channel,
-        'n_probe_epochs': n_probe,
-        'n_irrelevant_epochs': n_irrelevant,
+        'n_probe_epochs': n_target,
+        'n_irrelevant_epochs': n_baseline,
         'n_bootstrap': n_bootstrap,
-        'threshold': threshold
+        'threshold': threshold,
+        'target_label': target_label,
     }
 
 
@@ -1058,29 +1177,52 @@ def main():
         
         # Artifact rejection
         st.subheader("Artifact Rejection")
-        
+
         col1, col2 = st.columns(2)
-        
+
         with col1:
-            use_rejection = st.checkbox(
-                "Enable artifact rejection",
-                value=True,
-                help="Reject epochs with excessive amplitude"
+            rejection_method = st.selectbox(
+                "Rejection method",
+                options=["None", "Static threshold", "Adaptive: IQR", "Adaptive: Z-score"],
+                index=1,
+                help=(
+                    "**None**: keep all epochs.  \n"
+                    "**Static**: reject if any channel peak-to-peak > threshold.  \n"
+                    "**Adaptive IQR**: reject outlier epochs > Q3 + k×IQR — "
+                    "robust and scale-independent, recommended for variable-quality signals.  \n"
+                    "**Adaptive Z-score**: reject epochs with amplitude z-score > k."
+                )
             )
-        
+
         with col2:
-            if use_rejection:
+            if rejection_method == "Static threshold":
                 reject_threshold = st.slider(
                     "Threshold (µV)",
-                    min_value=50.0,
-                    max_value=500.0,
-                    value=300.0,
-                    step=10.0,
-                    help="Higher = more epochs kept"
+                    min_value=50.0, max_value=1000.0, value=300.0, step=10.0,
+                    help="Reject epoch if any channel peak-to-peak exceeds this value."
                 )
-            else:
+                adaptive_method = None
+                adaptive_k = None
+            elif rejection_method in ("Adaptive: IQR", "Adaptive: Z-score"):
                 reject_threshold = None
-        
+                adaptive_method = "iqr" if "IQR" in rejection_method else "zscore"
+                k_label = "IQR multiplier k" if adaptive_method == "iqr" else "Z-score threshold k"
+                k_help = (
+                    "Reject epochs with amplitude > Q3 + k×IQR. "
+                    "Lower k = stricter (e.g. 2.5 removes more, 4.0 removes less)."
+                    if adaptive_method == "iqr"
+                    else "Reject epochs with amplitude z-score > k. "
+                    "Lower k = stricter (e.g. 2.5–3.5 typical)."
+                )
+                adaptive_k = st.slider(
+                    k_label, min_value=1.0, max_value=6.0, value=3.0, step=0.1,
+                    help=k_help
+                )
+            else:  # None
+                reject_threshold = None
+                adaptive_method = None
+                adaptive_k = None
+
         # Create epochs
         if st.button("Create Epochs", type="primary"):
             try:
@@ -1092,24 +1234,51 @@ def main():
                         baseline=baseline,
                         reject_threshold_uv=reject_threshold
                     )
+                    ptp_vals = None
+                    n_adaptive_dropped = 0
+                    if adaptive_method is not None:
+                        epochs, n_adaptive_dropped, ptp_vals, _ = adaptive_reject_epochs(
+                            epochs, method=adaptive_method, k=adaptive_k
+                        )
                     st.session_state.epochs = epochs
-                
+
+                n_s1_events = len([e for e in event_id.keys()
+                                   if 'S1_onset' in e or 's1_onset' in e.lower()])
+                n_dropped = n_s1_events - len(epochs)
+                drop_pct = (n_dropped / n_s1_events * 100) if n_s1_events > 0 else 0
+
                 st.success(f"✅ Created {len(epochs)} epochs!")
-                
-                # Show drop statistics
-                n_events = len([e for e in event_id.keys() 
-                               if 'S1_onset' in e or 's1_onset' in e.lower()])
-                n_dropped = n_events - len(epochs)
-                drop_pct = (n_dropped / n_events * 100) if n_events > 0 else 0
-                
-                col1, col2, col3 = st.columns(3)
+
+                col1, col2, col3, col4 = st.columns(4)
                 with col1:
-                    st.metric("Total Epochs", len(epochs))
+                    st.metric("Kept", len(epochs))
                 with col2:
-                    st.metric("Dropped", n_dropped)
+                    st.metric("Total dropped", n_dropped)
                 with col3:
-                    st.metric("Drop Rate", f"{drop_pct:.1f}%")
-                
+                    st.metric("Drop rate", f"{drop_pct:.1f}%")
+                with col4:
+                    if adaptive_method:
+                        st.metric("Adaptive dropped", n_adaptive_dropped)
+
+                if ptp_vals is not None:
+                    with st.expander("📊 Epoch amplitude distribution"):
+                        fig_ptp, ax_ptp = plt.subplots(figsize=(8, 3))
+                        ax_ptp.hist(ptp_vals, bins=30, color='#1f77b4',
+                                    alpha=0.7, edgecolor='black')
+                        q1_v, q3_v = np.percentile(ptp_vals, [25, 75])
+                        if adaptive_method == "iqr":
+                            upper = q3_v + adaptive_k * (q3_v - q1_v)
+                        else:
+                            upper = ptp_vals.mean() + adaptive_k * ptp_vals.std()
+                        ax_ptp.axvline(upper, color='red', linestyle='--', linewidth=2,
+                                       label=f'Threshold ({upper:.0f} µV)')
+                        ax_ptp.set_xlabel('Peak-to-peak amplitude (µV)')
+                        ax_ptp.set_ylabel('Epoch count')
+                        ax_ptp.set_title('Epoch amplitude distribution (before adaptive rejection)')
+                        ax_ptp.legend()
+                        st.pyplot(fig_ptp)
+                        plt.close()
+
             except Exception as e:
                 st.error(f"❌ Error creating epochs: {str(e)}")
                 st.code(traceback.format_exc())
@@ -1204,34 +1373,95 @@ def main():
     
     elif page == "🎯 ERP Analysis":
         st.header("🎯 Event-Related Potential Analysis")
-        
+
         if st.session_state.epochs is None:
             st.warning("⚠️ Please create epochs first (Epoching page)")
             return
-        
+
         epochs = st.session_state.epochs
-        
+
+        # ----------------------------------------------------------------
+        # Analysis configuration
+        # ----------------------------------------------------------------
+        st.subheader("Analysis Configuration")
+        conf_col1, conf_col2 = st.columns(2)
+
+        with conf_col1:
+            available_channels = list(epochs.ch_names)
+            selected_channels = st.multiselect(
+                "Channels to include",
+                options=available_channels,
+                default=available_channels,
+                help=(
+                    "Subset of channels used for ERP waveforms and CTP-BAD. "
+                    "Useful when only some electrodes have clean signal."
+                )
+            )
+            if not selected_channels:
+                st.warning("No channels selected — using all.")
+                selected_channels = available_channels
+
+        with conf_col2:
+            stim_ids = extract_stim_ids(st.session_state.event_id or {})
+            if stim_ids:
+                target_options = ["probe (default)"] + stim_ids
+                target_choice = st.selectbox(
+                    "Target stimulus",
+                    options=target_options,
+                    index=0,
+                    help=(
+                        "Stimulus treated as 'target' in comparison.  \n"
+                        "**probe (default)**: the designated probe object.  \n"
+                        "**any stim_id**: test recognition of that specific object "
+                        "(e.g. select an irrelevant to check for incidental learning)."
+                    )
+                )
+                target_stim = None if target_choice == "probe (default)" else target_choice
+
+                baseline_options = [s for s in stim_ids if s != target_stim]
+                baseline_stims = st.multiselect(
+                    "Baseline stimuli (compare against)",
+                    options=baseline_options,
+                    default=baseline_options,
+                    help=(
+                        "Average these objects as the baseline ERP. "
+                        "Empty = all irrelevant events."
+                    )
+                )
+                if not baseline_stims:
+                    baseline_stims = None
+            else:
+                target_stim = None
+                baseline_stims = None
+                st.info("No stim_id found in events — using default probe vs irrelevant.")
+
+        st.markdown("---")
+
         # Compute ERPs
         if st.button("Compute ERPs", type="primary"):
             with st.spinner("Computing ERPs..."):
-                probe_erp, irrelevant_erp, probe_events, irrelevant_events = compute_erps(epochs)
-                
-                if probe_erp is not None and irrelevant_erp is not None:
-                    st.session_state.probe_erp = probe_erp
-                    st.session_state.irrelevant_erp = irrelevant_erp
-                    
+                target_erp, baseline_erp, _, _ = compute_erps(
+                    epochs,
+                    target_stim=target_stim,
+                    baseline_stims=baseline_stims,
+                    channels=selected_channels
+                )
+
+                if target_erp is not None and baseline_erp is not None:
+                    st.session_state.probe_erp = target_erp
+                    st.session_state.irrelevant_erp = baseline_erp
+
                     st.success("✅ ERPs computed successfully!")
-                    
-                    # Show trial counts
+
                     col1, col2 = st.columns(2)
                     with col1:
-                        st.metric("Probe Trials", len(probe_erp.nave))
+                        st.metric("Target Trials", target_erp.nave)
                     with col2:
-                        st.metric("Irrelevant Trials", len(irrelevant_erp.nave))
-                
+                        st.metric("Baseline Trials", baseline_erp.nave)
+
                 else:
-                    st.error("❌ Could not find probe/irrelevant events")
-                    st.info(f"Found events: {list(epochs.event_id.keys())}")
+                    st.error("❌ Could not find target/baseline events.")
+                    st.info(f"Available events (first 10): {list(epochs.event_id.keys())[:10]}")
         
         # Display ERP analysis
         if (st.session_state.probe_erp is not None and 
@@ -1395,7 +1625,10 @@ def main():
                             tmin=p300_start,
                             tmax=p300_end,
                             n_bootstrap=int(bad_n_bootstrap),
-                            threshold=bad_threshold
+                            threshold=bad_threshold,
+                            channels=selected_channels,
+                            target_stim=target_stim,
+                            baseline_stims=baseline_stims,
                         )
                         
                         # Store in session state
@@ -1433,7 +1666,11 @@ def main():
                 
                 with col3:
                     verdict_color = "red" if bad_results['overall_classification'] == "GUILTY" else "green"
-                    st.markdown(f"**Verdict:** :{verdict_color}[{bad_results['verdict']}]")
+                    target_lbl = bad_results.get('target_label', 'probe')
+                    st.markdown(
+                        f"**Target:** `{target_lbl}`  \n"
+                        f"**Verdict:** :{verdict_color}[{bad_results['verdict']}]"
+                    )
                 
                 # Analysis details
                 with st.expander("📊 Analysis Details"):
