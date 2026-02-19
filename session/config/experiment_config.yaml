@@ -46,7 +46,7 @@ eeg:
     
     sampling_rate: 250  # Hz
     connection_timeout: 10.0  # seconds
-    buffer_size: 360  # seconds (1 hour)
+    buffer_size: 1800  # seconds (30 min) - must cover full session (5 blocks ≈ 21 min)
   
 # Display Settings
 display:
@@ -71,24 +71,30 @@ timing:
   
 # Trial Configuration
 trials:
-  num_blocks: 2  # default: 5 blocks
-  probe_repetitions: 2  # default: 80
-  irrelevant_repetitions: 2  # default: 80 - per irrelevant object
-  # total_trials: 80 + 4 (irr_objects) * 80 = 400 trials in total
+  num_blocks: 5  # default: 5 blocks
+  probe_repetitions: 80  # default: 80
+  irrelevant_repetitions: 80  # default: 80 - per irrelevant object
+  # total_trials = 80 + 4 (irr_objects) * 80 = 400 trials in total
   # 80 trials for one block
+
+  # probe_repetitions: 60   # 60 probe / (60 + 3×80) = 60/300 = 20% probe frequency
+  # irrelevant_repetitions: 80  # per irrelevant object (3 objects × 80 = 240)
+  # total_trials: 60 + 3 (irr_objects) * 80 = 300 trials in total
+  # 60 trials per block (300 / 5)
+
   target_proportion: 0.2  # 20% targets in S2
   
 # Stimuli Configuration
 stimuli:
   # S1: Images
   images:
-    probe_object: "pendrive"
+    probe_object: "wolf"
     irrelevant_objects:
-      - "mouse"
-      - "headphones"
-      - "cable_usb"
-      - "charger_tip"
-    use_normalized: true  # Use normalized images from images/normalized/
+      - "bear"
+      - "dog"
+      - "lynx"
+      - "capybara"
+    use_normalized: false  # Use normalized images from images/normalized/
     image_height: 400  # pixels
     
   # S2: Digit strings

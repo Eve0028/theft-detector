@@ -1,5 +1,11 @@
 */.obsidian/workspace*
 .idea
+*.csv
+*.fif
+*.jpg
+*.png
+*.jpeg
+*.md
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
