@@ -260,7 +260,8 @@ class P300_CIT_Experiment:
             output_dir,
             self.config['participant']['id'],
             self.config['participant']['session'],
-            suffix='behavioral'
+            suffix='behavioral',
+            condition=self.config['participant']['condition']
         )
         
         self.logger.info(f"Output file: {filename}")
@@ -337,8 +338,9 @@ class P300_CIT_Experiment:
                     eeg_output_dir,
                     self.config['participant']['id'],
                     self.config['participant']['session'],
-                    suffix='raw',  # MNE convention: *_raw.fif
-                    extension='fif'  # FIF format with embedded annotations
+                    suffix='raw',       # MNE convention: *_raw.fif
+                    extension='fif',    # FIF format with embedded annotations
+                    condition=self.config['participant']['condition']
                 )
                 
                 if self.eeg_handler.start_recording(eeg_filename):

@@ -69,11 +69,12 @@ def get_output_filename(
     participant_id: str,
     session_id: int,
     suffix: str = "behavioral",
-    extension: str = "csv"
+    extension: str = "csv",
+    condition: Optional[str] = None
 ) -> str:
     """
     Generate output filename with timestamp.
-    
+
     Parameters
     ----------
     output_dir : str
@@ -86,25 +87,31 @@ def get_output_filename(
         Filename suffix (default: "behavioral")
     extension : str, optional
         File extension without dot (default: "csv")
-        
+    condition : str, optional
+        Participant condition label, e.g. "thief" or "control"
+
     Returns
     -------
     str
         Full path to output file
     """
-    # Create output directory
     Path(output_dir).mkdir(parents=True, exist_ok=True)
-    
-    # Generate filename
+
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    
-    # For MNE compatibility: suffix should be at END before extension
-    # e.g., P001_S01_20260203_193318_raw.fif (not P001_S01_raw_20260203.fif)
+    condition_part = f"_{condition}" if condition else ""
+
+    # MNE convention: *_raw.fif → suffix at end before extension
     if suffix:
-        filename = f"{participant_id}_S{session_id:02d}_{timestamp}_{suffix}.{extension}"
+        filename = (
+            f"{participant_id}_S{session_id:02d}{condition_part}"
+            f"_{timestamp}_{suffix}.{extension}"
+        )
     else:
-        filename = f"{participant_id}_S{session_id:02d}_{timestamp}.{extension}"
-    
+        filename = (
+            f"{participant_id}_S{session_id:02d}{condition_part}"
+            f"_{timestamp}.{extension}"
+        )
+
     return os.path.join(output_dir, filename)
 
 
@@ -266,4 +273,3 @@ def get_timestamp() -> Tuple[float, str]:
     now = time.time()
     iso_str = datetime.fromtimestamp(now).isoformat()
     return now, iso_str
-
