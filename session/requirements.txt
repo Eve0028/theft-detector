@@ -36,4 +36,5 @@ pytest-mock
 streamlit
 scipy
 matplotlib
+autoreject
 
