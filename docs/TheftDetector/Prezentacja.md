@@ -1,0 +1,3 @@
+- info o tym czemu ma służyć hipoteza / cel pracy
+- plan/agenda na początku?
+- zbyt szczegółowo (technikalia)?

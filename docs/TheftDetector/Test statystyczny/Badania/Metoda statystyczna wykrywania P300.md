@@ -1,0 +1,7 @@
+### Valley-to-Peak i Kompleks N200-P300 w CIT
+
+Ocena sygnału poprzez zautomatyzowane wyłapywanie relacji czasowych między ujemnym dnem (N200) a dodatnim szczytem (P300) ma silne ugruntowanie w najnowszych technikach detekcji informacji ukrytej.
+
+- **Hu, X., et al. (2013). _N200 and P300 as orthogonal and integrable indicators of distinct awareness and recognition processes in memory detection._ Psychophysiology.** W tym przełomowym artykule badacze udowadniają, że N200 oraz P300 wskazują na oddzielne procesy poznawcze podczas ukrywania informacji. N200 koreluje z hamowaniem reakcji/konfliktem, a P300 z rozpoznaniem faktu. Obliczanie tzw. _Peak-to-Peak_ obejmującego N200 do P300 to próba zintegrowania tego dwuetapowego mechanizmu.
+    
+- **Gamer, M., & Berti, S. (2010). _Task relevance and recognition of concealed information have different influences on the electrodermal activity and the event-related brain potentials in a GKT._ Psychophysiology.** Praca dowodząca, że w testach CIT (Guilty Knowledge Test) sygnał ERP składa się z wczesnych, jak i późnych fal. Zautomatyzowane poszukiwanie miar łączonych (takich jak amplituda pomiędzy komponentami ujemnymi a dodatnimi) często lepiej klasyfikuje "Winnych" uczestników niż samo izolowane P300.

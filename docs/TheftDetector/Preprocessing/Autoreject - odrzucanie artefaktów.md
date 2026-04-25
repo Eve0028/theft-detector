@@ -1,0 +1,3 @@
+Zautomatyzowane podejście "ślepe" (Blind / Automated Pipeline)
+
+**Jas, M., et al. (2017). _Autoreject: Automated artifact rejection for MEG and EEG data._ NeuroImage.** To dokumentacja wspominanej przeze mnie biblioteki `autoreject` do MNE-Python. Praca doskonale uzasadnia, dlaczego stosowanie subiektywnych, ręcznie dobieranych progów artefaktów (lub stałych progów dla wszystkich badanych przy różnej jakości kontaktu elektrod) zniekształca badanie, i proponuje algorytm w pełni automatyczny, oparty na _machine learningu_.
