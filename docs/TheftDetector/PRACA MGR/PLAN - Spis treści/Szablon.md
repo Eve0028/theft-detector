@@ -52,11 +52,11 @@
 
 8. Pipeline i preprocessing danych:
 
-	a) Opis, że bazujemy tylko na P300 nie włączamy N200 ze względu na:
-	- Różnice w N200 pomiędzy winnymi a niewinnymi mogą czasami wynikać ze słabego doboru samych bodźców (różnic w ich fizycznym/wizualnym wyglądzie) - dobrane pluszaki (ich zdjęcia) mogłyby zakłamać wynik;
-	- Wzmocniona fala N200 w odpowiedzi na bodziec Probe najsilniej pojawia się u osób o tzw. "wysokiej świadomości", czyli tych, które są mocno skupione na fakcie ukrywania informacji. Z ankiet końcowych wynika, że uczestnicy nie starali się ukryć informacji (pomimo powiedzenia im, że mają starać się ukryć informację kradzieży) - nie przekazano im żadnych informacji na temat counter-measures, sami równiez ich nie używali. Moje badanie nie ma na celu sprawdzenie radzenia sobie z counter-measures.
+	1. Opis, że bazujemy tylko na P300 nie włączamy N200 ze względu na:
+		- Różnice w N200 pomiędzy winnymi a niewinnymi mogą czasami wynikać ze słabego doboru samych bodźców (różnic w ich fizycznym/wizualnym wyglądzie) - dobrane pluszaki (ich zdjęcia) mogłyby zakłamać wynik;
+		- Wzmocniona fala N200 w odpowiedzi na bodziec Probe najsilniej pojawia się u osób o tzw. "wysokiej świadomości", czyli tych, które są mocno skupione na fakcie ukrywania informacji. Z ankiet końcowych wynika, że uczestnicy nie starali się ukryć informacji (pomimo powiedzenia im, że mają starać się ukryć informację kradzieży) - nie przekazano im żadnych informacji na temat counter-measures, sami równiez ich nie używali. Moje badanie nie ma na celu sprawdzenie radzenia sobie z counter-measures.
 	
-	b) Opis preprocessingu:
+	2. Opis preprocessingu:
 		1. **Aggressive filter (data rescue):**
 			- **Noth filter** - **50 Hz**.
 			- IIR Butterworth **0.5–30 Hz** (order 4) with steep rolloff. Designed to remove large slow-wave drift while preserving the P300 band. Wytłumaczyć dlaczego używamy takiego agresywniejszego filtra i dodać zdjęcie sygnału.
