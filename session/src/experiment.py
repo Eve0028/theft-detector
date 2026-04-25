@@ -117,6 +117,9 @@ class P300_CIT_Experiment:
         else:
             self.lsl_sender = LSLMarkerSender(enabled=False)
         
+        # Impedance check in console (before opening PsychoPy window)
+        self._run_impedance_check()
+
         # Initialize BrainAccess EEG handler
         if self.config['eeg']['enabled'] and self.config['eeg']['device_type'] == 'brainaccess':
             ba_config = self.config['eeg']['brainaccess']
@@ -134,20 +137,10 @@ class P300_CIT_Experiment:
             if self.eeg_handler.connect():
                 self.logger.info("BrainAccess device ready")
                 
-                # Check signal quality (wait for buffer to fill)
+                # Signal quality check with console confirmation
                 self.logger.info("Collecting data for signal quality check...")
-                time.sleep(3)  # Wait for data (need 250 samples = 1s @ 250Hz)
-                
-                # Check buffer size
-                buffer_samples = len(self.eeg_handler.eeg_data)
-                self.logger.info(f"Buffer has {buffer_samples} samples")
-                
-                quality = self.eeg_handler.get_signal_quality()
-                self.logger.info(f"Signal quality: {quality}")
-                
-                for ch, q in quality.items():
-                    if q == 'poor':
-                        self.logger.warning(f"Poor signal quality on channel {ch}")
+                time.sleep(3)  # Wait for buffer to fill (≥1 s @ 250 Hz)
+                self._run_signal_quality_check()
             else:
                 self.logger.error(
                     "Failed to connect to BrainAccess device. "
@@ -179,6 +172,252 @@ class P300_CIT_Experiment:
         
         self.logger.info("Setup complete!")
     
+    def _run_impedance_check(self) -> None:
+        """Measure electrode impedances in console before opening the experiment window.
+
+        Uses BrainAccess impedance mode (31.2 Hz injection current). Prints a
+        live table every 4 seconds and waits for the operator to confirm signal
+        quality before proceeding. Repeats on demand.
+
+        After the check the Bluetooth connection is released and the library is
+        closed so that :meth:`setup` can reconnect normally via
+        :class:`BrainAccessHandler`.
+        """
+        if not (self.config['eeg']['enabled']
+                and self.config['eeg']['device_type'] == 'brainaccess'):
+            return
+
+        try:
+            from brainaccess.core.eeg_manager import EEGManager
+            from brainaccess.core import scan as _ba_scan
+            from brainaccess.utils.acquisition import EEG
+        except ImportError as exc:
+            print(f"\n[WARN] BrainAccess SDK unavailable: {exc}")
+            print("       Skipping impedance check.\n")
+            return
+
+        ba_config = self.config['eeg']['brainaccess']
+        sfreq: int = ba_config.get('sampling_rate', 250)
+
+        # Build cap dict {physical_index: label} from config channel_mapping.
+        channel_mapping = ba_config.get('channel_mapping') or {}
+        if channel_mapping:
+            cap = {int(v): k for k, v in channel_mapping.items()}
+        else:
+            _default = {'F3': 0, 'F4': 1, 'C3': 2, 'C4': 3,
+                        'P3': 4, 'P4': 5, 'O1': 6, 'O2': 7}
+            cap = {_default[ch]: ch
+                   for ch in ba_config.get('channels', [])
+                   if ch in _default}
+        if not cap:
+            print("\n[WARN] No channel mapping for impedance check. Skipping.\n")
+            return
+
+        SEP = "  " + "-" * 44
+        print()
+        print("  " + "=" * 44)
+        print("  EEG IMPEDANCE CHECK")
+        print("  " + "=" * 44)
+        print("  Scanning for BrainAccess device...")
+
+        eeg = None
+        try:
+            with EEGManager() as mgr:
+                # EEG.__init__ calls bacore.init() — do NOT call ba_init() before.
+                eeg = EEG()
+
+                devices = _ba_scan()
+                if not devices:
+                    print("  [WARN] No BrainAccess device found.")
+                    print("         Skipping impedance check.")
+                else:
+                    device_name: str = devices[0].name
+                    print(f"  Device  : {device_name}")
+                    print(f"  Channels: {list(cap.values())}")
+                    print("  Target  : < 10 kOhm (good),  < 5 kOhm (excellent)")
+                    print()
+
+                    eeg.setup(mgr, device_name=device_name, cap=cap, sfreq=sfreq)
+
+                    while True:
+                        # Pattern from official SDK example: start, wait for signal
+                        # to stabilise (~2 s), then read only the last stable window.
+                        # Device firmware applies Ohm's law and outputs impedance
+                        # in Ohms directly on the ELECTRODE_MEASUREMENT channels.
+                        print("  Measuring... (4 s)")
+                        eeg.start_impedance_measurement()
+                        time.sleep(4)
+                        # tim=2: discard the first ~2 s of transients.
+                        # Note: must use annotations=True (default) so that
+                        # get_mne() calls get_annotations() first — otherwise
+                        # convert_to_mne() raises KeyError on empty annotations dict.
+                        raw = eeg.get_mne(tim=2)
+                        eeg.stop_impedance_measurement()
+
+                        ch_types = raw.get_channel_types()
+                        eeg_idx = [i for i, t in enumerate(ch_types) if t == 'eeg']
+                        # get_data() returns values in Ohms (device firmware output)
+                        data = raw.get_data()
+
+                        print()
+                        print(f"  {'Channel':<10} {'Impedance':>12}   Quality")
+                        print(SEP)
+                        all_ok = True
+                        for i in eeg_idx:
+                            ch = raw.ch_names[i]
+                            imp_ohm = float(np.mean(np.abs(data[i])))
+                            imp_k = imp_ohm / 1000.0
+                            if imp_ohm < 5_000:
+                                status = "[OK]   Excellent"
+                            elif imp_ohm < 10_000:
+                                status = "[OK]   Good"
+                            elif imp_ohm < 20_000:
+                                all_ok = False
+                                status = "[WARN] Acceptable"
+                            else:
+                                all_ok = False
+                                status = "[FAIL] Too high"
+                            print(f"  {ch:<10} {imp_k:>10.2f} kOhm   {status}")
+                        print(SEP)
+                        if all_ok:
+                            print("  All channels within acceptable range.")
+                        else:
+                            print("  Some channels have high impedance.")
+                            print("  -> Check electrode contact and apply more gel.")
+                        print()
+
+                        choice = input(
+                            "  [R] Remeasure   [Enter] Start experiment: "
+                        ).strip().lower()
+                        if choice != 'r':
+                            break
+                        print()
+
+            # EEGManager context exit calls disconnect() — on Windows this
+            # blocks ~5 s for the BT stack to release the connection.
+            if eeg is not None:
+                eeg.close()   # bacore.close()
+            time.sleep(1)  # Extra margin before BrainAccessHandler reconnects.
+
+        except KeyboardInterrupt:
+            print("\n  Impedance check interrupted by user.")
+            if eeg is not None:
+                eeg.close()
+        except Exception as exc:
+            print(f"\n  [WARN] Impedance check error: {exc}")
+            print("         Proceeding without impedance check.")
+            if eeg is not None:
+                eeg.close()
+
+        print("  -> Reconnecting device for recording...\n")
+
+    def _run_signal_quality_check(self) -> None:
+        """Console signal quality check with confirmation before opening the experiment window.
+
+        Displays chunk index assignments (verifies SDK channel mapping), then
+        shows a live table of per-channel std / peak-to-peak amplitudes and
+        quality ratings. Detects sample-counter drift artifacts. The operator
+        can re-check or confirm readiness.
+        """
+        SEP = "  " + "-" * 56
+
+        print()
+        print("  " + "=" * 56)
+        print("  EEG SIGNAL QUALITY CHECK")
+        print("  " + "=" * 56)
+
+        # --- One-time: show resolved chunk indices for verification ---
+        chunk_map = self.eeg_handler.chunk_index_map
+        ch_mapping = self.eeg_handler.channel_mapping
+        if chunk_map:
+            print()
+            print(f"  {'Channel':<10} {'Phys.Idx':>10}   {'Chunk Idx':>12}   (SDK mapping)")
+            print(SEP)
+            for ch_name, chunk_idx in chunk_map.items():
+                phys_idx = ch_mapping.get(ch_name, -1)
+                print(f"  {ch_name:<10} {phys_idx:>10}   {chunk_idx:>12}")
+            print(SEP)
+            self.logger.info(f"Chunk index map: {chunk_map}")
+
+        while True:
+            data, ch_names = self.eeg_handler.get_recent_data(seconds=3.0)
+            quality = self.eeg_handler.get_signal_quality()
+
+            buffer_samples = len(self.eeg_handler.eeg_data)
+            self.logger.info(
+                f"Signal quality — buffer: {buffer_samples} samples, "
+                f"quality: {quality}"
+            )
+
+            print()
+            print(f"  {'Channel':<10} {'Std (µV)':>10}   {'P2P (µV)':>10}   Status")
+            print(SEP)
+
+            all_ok = True
+            for i, ch in enumerate(ch_names):
+                q = quality.get(ch, 'no_data')
+
+                std_uv = ptp_uv = 0.0
+                is_drift_artifact = False
+
+                if data is not None and data.ndim == 2 and i < data.shape[1]:
+                    ch_data = data[:, i].astype(float)
+                    std_uv = float(np.std(ch_data))
+                    ptp_uv = float(np.ptp(ch_data))
+
+                    # Detect sample-counter artifact:
+                    # A true counter increments by exactly 1/sample → the
+                    # signal is a perfectly smooth ramp with detrended_std ≈ 0.
+                    # Real electrode drift is noisy (detrended_std >> 10 µV).
+                    # Criterion: smooth ramp AND large trend relative to noise.
+                    t = np.arange(len(ch_data), dtype=float)
+                    slope, intercept = np.polyfit(t, ch_data, 1)
+                    trend_range = abs(slope) * len(ch_data)
+                    detrended_std = float(np.std(ch_data - (slope * t + intercept)))
+                    if detrended_std < 10.0 and trend_range > 100.0 * max(detrended_std, 0.01):
+                        is_drift_artifact = True
+
+                if is_drift_artifact:
+                    all_ok = False
+                    status = "[FAIL] Drift/counter artifact"
+                    self.logger.error(
+                        f"Channel {ch} shows linear drift — possible sample-counter "
+                        f"read (wrong chunk index). Check channel mapping!"
+                    )
+                elif q == 'poor':
+                    all_ok = False
+                    status = "[FAIL] Poor"
+                    self.logger.warning(f"Poor signal quality on channel {ch}")
+                elif q == 'fair':
+                    status = "[WARN] Fair"
+                elif q == 'no_data':
+                    all_ok = False
+                    status = "[FAIL] No data"
+                else:
+                    status = "[OK]   Good"
+
+                print(f"  {ch:<10} {std_uv:>10.1f}   {ptp_uv:>10.1f}   {status}")
+
+            print(SEP)
+            if all_ok:
+                print("  All channels within acceptable range.")
+            else:
+                print("  Some channels have issues.")
+                print("  -> Check electrode contact and apply more gel.")
+                print("  -> 'Drift/counter artifact' = wrong SDK chunk index!")
+            print()
+
+            choice = input(
+                "  [R] Re-check   [Enter] Start experiment: "
+            ).strip().lower()
+            if choice != 'r':
+                break
+
+            print("  Re-checking... (collecting 3 s of data)")
+            time.sleep(3)
+
+        print()
+
     def _normalize_color(self, rgb: List[int]) -> List[float]:
         """Convert RGB [0, 255] to PsychoPy range [-1, 1]."""
         return [(c / 127.5) - 1 for c in rgb]
