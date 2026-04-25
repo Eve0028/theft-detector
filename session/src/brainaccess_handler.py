@@ -32,10 +32,12 @@ try:
     from brainaccess.core import scan as ba_scan
     from brainaccess.core import init as ba_init
     from brainaccess.core import close as ba_close
+    from brainaccess.core.eeg_channel import ELECTRODE_MEASUREMENT as _BA_ELECTRODE_MEASUREMENT
     from brainaccess.utils.exceptions import BrainAccessException
     BRAINACCESS_AVAILABLE = True
 except Exception as exc:  # noqa: BLE001
     BRAINACCESS_AVAILABLE = False
+    _BA_ELECTRODE_MEASUREMENT = 1  # fallback: ELECTRODE_MEASUREMENT = 1 per SDK docs
     logger.error("BrainAccess SDK not available: %s", exc)
 
 
@@ -129,16 +131,23 @@ class BrainAccessHandler:
             
             # Setup channels
             self._setup_channels()
-            self.eeg_manager.set_callback_chunk(self._on_chunk)
-            
-            # Load config and start stream
+
+            # Load config and start stream (no callback yet — map not ready)
             try:
                 self.eeg_manager.load_config()
             except Exception:
                 pass  # Non-critical
-            
+
             self.eeg_manager.start_stream()
+
+            # Build chunk index map BEFORE registering the callback.
+            # The device may burst-send a large backlog of buffered samples
+            # the moment the callback is registered. If the map were empty at
+            # that point, every burst sample would be stored as 0.0.
             self._build_chunk_index_map()
+
+            # Register callback only after the map is ready.
+            self.eeg_manager.set_callback_chunk(self._on_chunk)
             
             self.is_connected = True
             if self.verbose:
@@ -178,19 +187,34 @@ class BrainAccessHandler:
             if self.verbose:
                 self.logger.info(f"Channel mapping for {self.channels}: {self.channel_mapping}")
             
-            # Enable channels
+            # Enable/disable channels.
+            # set_channel_enabled() takes a channel *address*, not a physical index.
+            # EEG electrode addresses start at ELECTRODE_MEASUREMENT (=1), so
+            # physical channel N lives at address ELECTRODE_MEASUREMENT + N.
+            # BrainAccess MINI/CAP supports up to 8 physical electrode positions.
+            _MAX_ELECTRODE_CHANNELS = 8
             physical_indices = set(self.channel_mapping.values())
             if self.verbose:
-                self.logger.info(f"Enabling physical channels: {physical_indices}")
-            
-            for idx in physical_indices:
+                self.logger.info(
+                    f"Enabling physical channels {physical_indices}, "
+                    f"disabling the rest (0–{_MAX_ELECTRODE_CHANNELS - 1})"
+                )
+
+            for idx in range(_MAX_ELECTRODE_CHANNELS):
+                channel_addr = _BA_ELECTRODE_MEASUREMENT + idx
+                enable = idx in physical_indices
                 try:
-                    self.eeg_manager.set_channel_enabled(idx, True)
+                    self.eeg_manager.set_channel_enabled(channel_addr, enable)
                     if self.verbose:
-                        self.logger.info(f"  Channel {idx} enabled")
+                        action = "enabled " if enable else "disabled"
+                        self.logger.info(
+                            f"  Channel {idx} {action} (addr {channel_addr})"
+                        )
                 except Exception as e:
                     if self.verbose:
-                        self.logger.warning(f"  Failed to enable channel {idx}: {e}")
+                        self.logger.warning(
+                            f"  Channel {idx} (addr {channel_addr}): {e}"
+                        )
             
         except Exception as e:
             self.logger.error(f"Channel setup error: {e}")
@@ -207,14 +231,25 @@ class BrainAccessHandler:
         for ch in self.channels:
             phys_idx = self.channel_mapping.get(ch, -1)
             if phys_idx >= 0:
+                # get_channel_index() takes a channel *address*.
+                # EEG measurements start at ELECTRODE_MEASUREMENT (=1), so
+                # physical channel N → address ELECTRODE_MEASUREMENT + N.
+                # Passing phys_idx directly would return the SAMPLE_NUMBER
+                # chunk index for channel 0, causing a sample-counter read.
+                channel_addr = _BA_ELECTRODE_MEASUREMENT + phys_idx
                 try:
-                    chunk_idx = self.eeg_manager.get_channel_index(phys_idx)
+                    chunk_idx = self.eeg_manager.get_channel_index(channel_addr)
                     self.chunk_index_map[ch] = chunk_idx
                     if self.verbose:
-                        self.logger.info(f"  {ch} (physical {phys_idx}) -> chunk index {chunk_idx}")
+                        self.logger.info(
+                            f"  {ch} (physical {phys_idx}, addr {channel_addr})"
+                            f" -> chunk index {chunk_idx}"
+                        )
                 except Exception as e:
                     if self.verbose:
-                        self.logger.warning(f"  {ch} (physical {phys_idx}) failed: {e}")
+                        self.logger.warning(
+                            f"  {ch} (physical {phys_idx}, addr {channel_addr}) failed: {e}"
+                        )
         
         if self.verbose:
             self.logger.info(f"Final chunk_index_map: {self.chunk_index_map}")
@@ -363,11 +398,12 @@ class BrainAccessHandler:
             return False
     
     def _save_to_csv(self) -> bool:
-        """Save EEG data to CSV (legacy format)."""
+        """Save EEG data to CSV (legacy format, values in µV)."""
         if self.output_file is None:
             return False
-        
+
         try:
+            # Data is in µV (BrainAccess callback units) — no conversion needed for CSV.
             data_array = np.array(list(self.eeg_data))
             timestamps_array = np.array(list(self.timestamps))
             
@@ -402,9 +438,11 @@ class BrainAccessHandler:
         
         try:
             # Convert data
-            data_array = np.array(list(self.eeg_data)).T  # (channels, times)
+            # BrainAccess SDK callback returns samples in µV.
+            # MNE RawArray expects data in Volts → divide by 1e6.
+            data_array = np.array(list(self.eeg_data)).T * 1e-6  # µV → V
             timestamps_array = np.array(list(self.timestamps))
-            
+
             # Create MNE Info
             ch_types = ['eeg'] * len(self.channels)
             info = mne.create_info(
@@ -412,7 +450,7 @@ class BrainAccessHandler:
                 sfreq=self.sampling_rate,
                 ch_types=ch_types
             )
-            
+
             # Create Raw object
             raw = mne.io.RawArray(data_array, info)
             
