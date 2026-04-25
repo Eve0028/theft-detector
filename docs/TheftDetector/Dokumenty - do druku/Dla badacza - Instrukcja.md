@@ -25,7 +25,7 @@
 
 - [ ] Losowanie grupy (jeśli nie zrobiono wcześniej).
 - [ ] **Instrukcja dla Grupy Eksperymentalnej (Z):**
-    > _"W pokoju obok, w pudełku, jest przedmiot. Wejdź tam, otwórz pudełko i dokładnie go obejrzyj przez ok. 30 sekund. Zapamiętaj go, schowaj do kieszeni i wróć. Od teraz to Twój przedmiot – Twoim celem będzie zachowanie się tak, jakbyś go nie znał."_
+    > _"W pokoju obok, w pudełku, jest przedmiot. Wejdź tam, otwórz pudełko i dokładnie go obejrzyj przez ok. 30 sekund (Proszę dokładnie obejrzeć i zapamiętać ten przedmiot. Będzie on istotny w dalszej części badania.). Zapamiętaj go, schowaj i wróć. Od teraz to Twój przedmiot – Twoim celem będzie zachowanie się tak, jakbyś go nie znał."_
 - [ ] **Instrukcja dla Grupy Kontrolnej (K):**
     > _"Proszę, przejdź do pokoju obok. Na stole znajdziesz arkusz obecności – podpisz go i wróć. Nic więcej nie dotykaj."_
 - [ ] [ ] Uczestnik wyszedł do pokoju. [ ] Uczestnik wrócił.

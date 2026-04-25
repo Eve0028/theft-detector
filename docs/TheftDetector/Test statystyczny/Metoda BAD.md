@@ -1,12 +1,12 @@
 ## Opis
 Metoda BAD (Bootstrap Amplitude Difference) to **nieparametryczny test statystyczny** stosowany w analizie P300 w eksperymentach typu Concealed Information Test (CIT).  
-Jej celem jest sprawdzenie, czy odpowiedzi na bodźce **probe** (znane sprawcy) różnią się od odpowiedzi na bodźce **irrelevant** (neutralne, nieznane sprawcy).  
+Jej celem jest sprawdzenie, czy odpowiedzi na bodźce **probe** (znane sprawcy) różnią się od odpowiedzi na bodźce **irrelevant** (neutralne, nieznane sprawcy).
 
 ---
 ## Pipeline
 
 1. **Preprocessing sygnału EEG**  
-   - [[Preprocessing]] lub [[Preprocessing - Muse]]
+   - [[Preprocessing - BrainAccess]] lub [[Preprocessing - Muse]]
 
 2. **Wybór okna analizy**  
    - Okno czasowe: 300–600 ms po bodźcu.  
