@@ -17,10 +17,11 @@
 
 5. ERP (event-related potential)
 	- Czym jest ERP (jak je mierzymy itp.).
-	- Czym jest P300 - i dlaczego ten marker w naszym zadaniu będzie najlpeszy (bodźce znane itp.).
+	- Czym jest P300/N200 itp.
 
 6. Historia CIT/CTP
 	- Ewolucja metod detekcji kłamstwa jeśli chodzi o wykorzystanie EEG, ich wady, zalety, różnice.
+	- Na jakie markery ERP się patrzy (P300, N200 itp.) i dlaczego.
 	- Wyniki klasyfikacji różnych badań.
 	- Astepkty etyczne i prawne (neuroprawo).
 	- Tutaj dużo cytowań.
@@ -28,9 +29,10 @@
 7. Metodologia badania
 	- Wprowadzenie: zdecydowanie się na metodę CTP (podział na zadania S1 i S2...) - i dlaczego.
 	- Użyty sprzęt BrainAccess wypożyczony był od Politechniki Krakowskiej (Wydziału Matematyki i Informatyki), całość badania była przerowadzona w pomieszczeniu w budynku na terenie PK (ul. Warszawska).
+	- Wybranie użytych elektrod (Fz, Cz, Pz) - opis przepinania elektrod czepka (zmiana drogi kabelków itp.).
 	- Grupa badawcza (charakterystyka), szukanie grupy odbyło się przez komunikator Teams na grupie wydziałowej. Chętni zostali poinformowani o ogólnym opisie badania EEG, wymaganiach (wykluczenie implantów w głowie, ran na skórze głowy, zażywania leków psychotropowych itp); zebrani uczestnicy to studenci PK (ilość: 14). Dopisanie innych info: rozkład wieku, płci itp.
 	- Opis przedmiotów użytych w badaniu - pluszaki (testy jakości sygnału wykazywały kiepski SNR i postanowiono użyć przedmiotów, które "podwyższą" segment P300, bardziej wpłyną na uwagę, będą bardziej charakterystyczne i różne pomiędzy sobą itp.); przedstawienie ich na zdjęciach; kradziony pluszak to "wilk". Opis wykonania zdjęć (jednolite tło itp.).
-	- Każdy był badany osobno w innych godzinach/terminie. Czas badania to około 1h-1.5h (przygotowanie ok. 15-30min; sesja ok. 30min; tłumaczenie wstępnych wyników/procedur itp., ankiety ok. 15-30min).
+	- Każdy był badany osobno w innych godzinach/terminie. Czas badania to około 1h-1.5 (przygotowanie ok. 15-30min; sesja ok. 30min; tłumaczenie wstępnych wyników/procedur itp., ankiety ok. 15-30min).
 	- **Struktura badania**:
 		- Przed badaniem uczestnicy musieli się przygotować: nie spożywać kofeiny (min. 3h przed badaniem), bez makijażu czy kremów na czole, umyć skórę głowy dzień przed lub w dniu badania. 
 		- Przygotowanie stanowiska (laptop, program, czyszczenie elektrod, przygotowanie roztworów czyszczących), podpisanie zgód RODO, wypełnienie ankiety wstępnej, wprowadzenie do badania (jak działa eeg itp.).
@@ -63,7 +65,7 @@
 			- Wytłumaczenie na jakich częstotliwościach pojawia się P300, i dlaczego inne filtrujemy.
 		2. **Epoching:** 
 			- 200 ms - 1000 ms.
-			- Wytłumaczyć co i jak, dlaczego się to stosuje (uśrednienie itp.). Plus sprawdzić czy trzeba brać tylko te epoki po których nastąpiła poprawna identyfikacja ciągu cyfr w poprzednim/następnym zadaniu S2. 
+			- Wytłumaczyć co i jak, dlaczego się to stosuje (uśrednienie itp.). Usuwanie całego triala (odpowiedzi S1), jeśli odpowiedź na powiązane z nim zadanie S2 była niepoprawna lub przekroczyła określony czas reakcji
 		3. **Baseline correction:**
 			- Okres od -200 ms do 0 ms.
 			- Wytłumaczyć co i jak, dlaczego się to stosuje.
@@ -92,7 +94,7 @@
 		8. **Dodanie metod uczenia maszynowego: SVM i LDA (Liniowa Analiza Dyskryminacyjna)** - ze względu na niezbyt optymistyczne wyniki z BAD:
 			- Model wewnątrzosobniczy (Intra-subject) - trenujemy model na reakcjach z zadania S2 (Target/Nontarget), a następnie używamy go do predykcji na zadaniu S1 (Probe/Irrelevant).
 			- Cechy:
-				- **Dla modelu SVM:** wektor złożony z **wyekstrahowanych współczynników falkowych** dla całego okna fali P300 (np. po zastosowaniu DWT/WPT dla pasm 0.5–16 Hz) - standaryzacja zbioru.
+				- **Dla modelu SVM:** wektor złożony z **wyekstrahowanych współczynników falkowych** dla całego okna fali P300 (np. po zastosowaniu DWT/WPT dla pasm 0.5–16 Hz) - standaryzacja zbioru. Falki **Daubechies (np. db4 lub db8)** oraz **Symlets (np. sym4 lub sym8)**; Poziom dekompozycji: **5**.
 				- **Dla modelu LDA:** ten sam **zestaw współczynników falkowych** oraz dorzucamy podstawowe statystyki (np. **stosunek amplitudy do latencji, peak-to-peak**), ale **stosujemy na nim algorytm selekcji cech (np. PCA, Stepwise LDA lub korelacje)**. Redukujemy zestaw z kilkudziesięciu/kilkuset parametrów falkowych do ok. 15-25 najsilniejszych cech i dopiero wtedy uczymy model LDA.
 		9. Obliczenie wyników metryk.
 	

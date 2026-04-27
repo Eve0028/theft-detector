@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "PRACA MGR/PLAN - Spis treści/Szablon.md",
+                "file": "PRACA MGR/PLAN - Spis treści/Spis treści.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "Szablon"
+              "title": "Spis treści"
             }
           }
         ]
@@ -78,7 +78,8 @@
       }
     ],
     "direction": "horizontal",
-    "width": 326.5
+    "width": 326.5,
+    "collapsed": true
   },
   "right": {
     "id": "c42556c924340d78",
@@ -171,19 +172,22 @@
   },
   "active": "4fd6a3455c1d7342",
   "lastOpenFiles": [
-    "Preprocessing/Test 2.md",
+    "PRACA MGR/PLAN - Spis treści/Szablon.md",
+    "PRACA MGR/PLAN - Spis treści/Spis treści.md",
     "Test statystyczny/Badania/Wybór okna P300.md",
+    "TODO.md",
+    "Eksperyment/Opis badania.md",
+    "Eksperyment/Paradygmaty wykrywania ukrytej informacji/WYBRANA Metoda - CTP/CTP - Pipeline sesji - końcowy.md",
+    "Dokumenty - do druku/Dla uczestnika - Ankieta wstępna.md",
+    "Preprocessing/Test 2.md",
     "Test statystyczny/Badania/Metoda statystyczna wykrywania P300.md",
     "Test statystyczny/Metoda BAD.md",
     "Test statystyczny/ML - klasyfikacja/Modele.md",
     "Test statystyczny/ML - klasyfikacja/ML - uczenie maszynowe.md",
     "Test statystyczny/ML - klasyfikacja/Cechy.md",
-    "PRACA MGR/PLAN - Spis treści/Szablon.md",
-    "Dokumenty - do druku/Dla uczestnika - Ankieta wstępna.md",
     "Dokumenty - do druku/Mail do uczestników - przed badaniem.md",
     "PRACA MGR/UWAGI/Do sprawdzenia.md",
     "PRACA MGR/UWAGI/Do dodania - w pracy.md",
-    "Eksperyment/Paradygmaty wykrywania ukrytej informacji/WYBRANA Metoda - CTP/CTP - Pipeline sesji - końcowy.md",
     "Preprocessing/Test 1.md",
     "PRACA MGR/PLAN - Spis treści",
     "PRACA MGR",
@@ -195,15 +199,12 @@
     "Eksperyment/Notes/Wzrastające-liniowe sygnały na wykresie.md",
     "Eksperyment/Notes",
     "Prezentacja.md",
-    "TODO.md",
     "Eksperyment/Paradygmaty wykrywania ukrytej informacji/Dwa paradygmaty wykrywania ukrytej informacji.md",
     "Eksperyment/Paradygmaty wykrywania ukrytej informacji/WYBRANA Metoda - CTP/CTP - Pipeline - konfiguracja.md",
     "Devices/Brainaccess - WYBRANY.md",
     "Eksperyment/Channels - Setup.md",
-    "Preprocessing/Preprocessing - BrainAccess.md",
     "Test statystyczny/Badania",
     "Pasted image 20260109172244.png",
-    "Devices/Muse S Athena.md",
     "Experiment - Notes",
     "Experiment - Notes",
     "Eksperyment/Paradygmaty wykrywania ukrytej informacji",

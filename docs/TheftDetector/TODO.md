@@ -29,3 +29,6 @@
 8. Filtracja dolnoprzepustowa (np. 6 Hz) w celu wygładzenia przed znalezieniem peaków.
 9. Ekstrakcja wartości Peak-to-Peak (Peak-Valley) w indywidualnie wyznaczonym wcześniej oknie dla wylosowanych przez Bootstrap prób.
 10. Zwrócenie wartości _p-value_ określającej winę/niewinność badanego.
+
+
+- [ ] Usuwanie całego triala (odpowiedzi S1), jeśli odpowiedź na powiązane z nim zadanie S2 była niepoprawna lub przekroczyła określony czas reakcji
