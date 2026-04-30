@@ -45,16 +45,16 @@
 		- epoch_smooth_lp_hz: 6.0 - 12.0, step=2.0
 3. Pozostałe 'options'
 
-
+<br>
 
 ## 2. Optymalizacja parametrów jest wykonywana przez Optune na podstawie **AUC**
 
-Dla każdego ze zbioru progów threahold (201 wartości od 0 do 1) kod robi:
+Dla każdego ze zbioru progów threshold (201 wartości od 0 do 1) kod robi:
 - „guilty” jeśli `max_proportion >= threshold`,
 - liczy TPR i FPR na całym zbiorze przy tym progu,
 potem składa krzywą ROC (przy wielu progach dających ten sam FPR bierze maksymalny TPR) i AUC = całka po FPR metodą trapezów.
 
-
+<br>
 
 ## 3. LOO (Leave One Out) CV (wewnątrz triala optuny) - Pipeline wyliczania 'threshold' i 'metryk końcowych'
 
@@ -65,7 +65,7 @@ potem składa krzywą ROC (przy wielu progach dających ten sam FPR bierze maksy
 5. Rotacja: Zwracamy osobę do puli, wyciągamy kolejną i powtarzamy cały proces od nowa (kroki 1-4). Powstanie 12 unikalnych modeli z potencjalnie 12 różnymi progami.
 6. Agregacja: Na koniec zliczamy wszystkie poprawne i niepoprawne klasyfikacje dla tych 12 niezależnych testów, obliczając ostateczną czułość, swoistość i dokładność całego pipeline'u.
 
-#### Szczegółowo
+### Szczegółowo
 #### Krok 1: Przetwarzanie sygnału i ekstrakcja cechy (BAD)
 Dla danej iteracji Optuny (czyli dla konkretnego, wylosowanego zestawu filtrów):
 - Algorytm bierze nagranie `.fif` pierwszej osoby (np. „złodzieja”).
@@ -82,6 +82,8 @@ Teraz wkracza walidacja krzyżowa. LOOCV operuje **tylko na tych 12 liczbach**.
 2. Na tych 11 wynikach algorytm testuje różne progi odcięcia (0.0 do 1.0), szukając takiego, który da najwyższą metrykę F-beta (optymalny próg `thr`).
 3. Mając wyuczony próg, patrzy na wyciągnięty wynik `0.85` i ocenia: „Czy `0.85` jest większe lub równe progowi?”. Zapisuje trafienie (lub pomyłkę).
 4. Pętla wraca do początku, wyciągając kolejną z 12 liczb, i powtarza proces.
+
+<br>
 
 ### Metryka optymalizacyjna - F-beta - dla wyznaczenia threshold
 
