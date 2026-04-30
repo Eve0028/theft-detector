@@ -1,30 +1,30 @@
 1. Filtering:
-	High-pass (Hz) -> [0.1, 0.3, 0.5, 0.7]
-	Low-pass (Hz) -> [12.0, 15.0, 20.0, 30.0]
-	IIR order -> [2, 3, 4]
+	- High-pass (Hz) -> [0.1, 0.3, 0.5, 0.7]
+	- Low-pass (Hz) -> [12.0, 15.0, 20.0, 30.0]
+	- IIR order -> [2, 3, 4]
 
 2. Epoching:
-	S1 tmin (s) -> [-0.2]
-	S1 tmax (s) -> [1.0]
-	S1 detrend method (DC offset / Linear) -> ['DC offset']
-	S1 rejection method (iqr / zscore / autoreject) -> ['autoreject', 'iqr']
-	Search adaptive k (IQR or Z-score sensitivity) -> [1.5, 2.0, 2.5, 3.0]
+	- S1 tmin (s) -> [-0.2]
+	- S1 tmax (s) -> [1.0]
+	- S1 detrend method (DC offset / Linear) -> ['DC offset']
+	- S1 rejection method (iqr / zscore / autoreject) -> ['autoreject', 'iqr']
+	- Search adaptive k (IQR or Z-score sensitivity) -> [1.5, 2.0, 2.5, 3.0]
 
 3. P300 Window:
-	P300 window mode: individual (based on S2) / static -> ['individual', 'static']
-	Individual window parameters (used when mode = individual):
-	- Margin ± (s) -> [0.10, 0.15, 0.20]
-	- Peak search start (s) -> [0.25, 0.30]
-	- Peak search end (s) -> [0.60, 0.70]
-	- S2 ERP LP cutoff (Hz) (with 'None' smoothing possibility) -> [6.0, 8.0, 10.0, 12.0, 'None']
-	Static window parameters (used when mode = static):
-	- Static window start (s) -> [0.25, 0.30]
-	- Static window end (s) -> [0.60, 0.70, 0.80]
+	- P300 window mode: individual (based on S2) / static -> ['individual', 'static']
+	- Individual window parameters (used when mode = individual):
+		- Margin ± (s) -> [0.10, 0.15, 0.20]
+		- Peak search start (s) -> [0.25, 0.30]
+		- Peak search end (s) -> [0.60, 0.70]
+		- S2 ERP LP cutoff (Hz) (with 'None' smoothing possibility) -> [6.0, 8.0, 10.0, 12.0, 'None']
+	- Static window parameters (used when mode = static):
+		- Static window start (s) -> [0.25, 0.30]
+		- Static window end (s) -> [0.60, 0.70, 0.80]
 
 4. CTP-BAD
-	Amplitude method -> ['mean', 'baseline-to-peak', 'peak-to-peak (Rosenfeld)', 'peak-to-peak (Peak-Valley)']
-	Smoothing - smoothing is always applied when choosen amplitude method type is 'Peak' -> ['None', 'low-pass (butterworth)']
-	Epoch smooth LP (Hz) -> [6.0, 8.0, 10.0, 12.0]
+	- Amplitude method -> ['mean', 'baseline-to-peak', 'peak-to-peak (Rosenfeld)', 'peak-to-peak (Peak-Valley)']
+	- Smoothing - smoothing is always applied when choosen amplitude method type is 'Peak' -> ['None', 'low-pass (butterworth)']
+	- Epoch smooth LP (Hz) -> [6.0, 8.0, 10.0, 12.0]
 
 
 ### Optuna implementation
@@ -32,19 +32,17 @@
 
 1. 'int':
 	- lp_cutoff: 12 - 30, step=3
-
 2. 'float':
-	Epoching:
-	- adaptive_k: 1.5 - 3.0, step=0.5
-	P300 Window:
-	- window_margin: 0.10 - 0.20, step=0.05
-	- peak_search_start: 0.25 - 0.35, step=0.05
-	- peak_search_end: 0.60 - 0.75, step=0.05
-	- static_window_start: 0.25 - 0.35, step=0.05
-	- static_window_end: 0.60 - 0.80, step=0.05
-	CTP-BAD:
-	- epoch_smooth_lp_hz: 6.0 - 12.0, step=2.0
-
+	- Epoching:
+		- adaptive_k: 1.5 - 3.0, step=0.5
+	- P300 Window:
+		- window_margin: 0.10 - 0.20, step=0.05
+		- peak_search_start: 0.25 - 0.35, step=0.05
+		- peak_search_end: 0.60 - 0.75, step=0.05
+		- static_window_start: 0.25 - 0.35, step=0.05
+		- static_window_end: 0.60 - 0.80, step=0.05
+	- CTP-BAD:
+		- epoch_smooth_lp_hz: 6.0 - 12.0, step=2.0
 3. Pozostałe 'options'
 
 
