@@ -31,4 +31,25 @@
 10. Zwrócenie wartości _p-value_ określającej winę/niewinność badanego.
 
 
-- [ ] Usuwanie całego triala (odpowiedzi S1), jeśli odpowiedź na powiązane z nim zadanie S2 była niepoprawna lub przekroczyła określony czas reakcji
+- [x] Usuwanie całego triala (odpowiedzi S1), jeśli odpowiedź na powiązane z nim zadanie S2 była niepoprawna lub przekroczyła określony czas reakcji
+- [x] To samo usuwanie epok S1 na podstawie niepoprawnych S2 trzeba również zaimplementować przed obliczaniem okna P300 z S2
+
+- [x] Zmień quick pipeline tak aby była dodatkowa opcja batch upload, która pozwala na dodawanie dwóch zbiorów plików (innocent i guilty). Na końcu dodaj dodatkowe podsumowanie i metryki
+- [x] Dodaj zakładkę z automatycznym obliczaniem najlepszych parametrów preprocessingu sygnału dla BAD (grid search, Optuna)
+
+- [ ] Dodaj parametr k do rejection method w "Quick Pipeline" -> "Step 2 — S2 Target Epochs"
+
+- [x] W przypadku filtrów IIR: mają one nieliniową odpowiedź fazową. Oznacza to, że mogą one "przesunąć" pik P300 na osi czasu, zaburzając latencję! Aby tego uniknąć, musisz upewnić się, że stosujesz filtrację w obu kierunkach przód-tył (tzw. _zero-phase filtering_, często zaimplementowane pod maską standardowych funkcji w bibliotece `mne` lub jako `filtfilt` w `scipy`). Dodatkowo wybór order filtra powinien być dyskretny (konkretnych liczb a nie z przedziału nawet typu int; i tylko parzystych wartości w wyborze).
+
+- [x] **25 czystych epok Probe** - Jeśli po preprocessingu (po odrzuceniu zaszumionych epok (np. przez `autoreject`) i usunięciu epok z błędnymi odpowiedziami na zadanie S2) zostaje Ci mniej niż 25 epok ze skradzionym przedmiotem, sygnał P300 będzie zbyt mocno zniekształcony przez losowy szum tła. Takie nagranie należy w całości odrzucić. W takim przypadku przy uczeniu Optuny - odrzuć cały trial.
+
+- [x] Zastosuj **Metrykę F-beta** - przy wyznaczaniu thresholdu w LOOCV (metoda BAD).
+
+- [x] Standardowa korekta linii bazowej wykorzystuje okno od -200 ms do 0 ms. Proces ten polega na odjęciu średniej z tego wycinka od całej reszty epoki. Jeśli jednak w tych konkretnych 200 milisekundach wystąpi nagły skok napięcia (np. badany przełknie ślinę), po odjęciu tej "brudnej" średniej cała fala P300 sztucznie przesunie się w dół (w stronę wartości ujemnych). Algorytmy odrzucające, takie jak wykorzystywany `autoreject`, muszą bezwzględnie brać pod uwagę wariancję w samym oknie _baseline_, a nie tylko w oknie bodźca. Zaszumiona baza dyskwalifikuje całą epokę. Sprawdź czy tak jest (jeśli nie, to popraw to we wszystkich miejscach).
+
+- [x] Dodaj, że jak wybieramy przy szukaniu parametrów dla metody BAD jedną z metod "Peak" - to optuna musi użyć smoothing (filtru).
+
+- [x] Sprawdź czy użycie LOO (Leave-One-Out) CV - jest dobrą metodą do szukania parametrów preprocessingu dla BAD
+
+- [ ] Dodaj metody ML (SVM, LDA)
+- [ ] Dodaj szukanie hyperparametrów przez Optunę dla ML

@@ -17,11 +17,11 @@
 
 5. ERP (event-related potential)
 	- Czym jest ERP (jak je mierzymy itp.).
-	- Czym jest P300/N200 itp.
+	- Czym jest P300 itp.
 
 6. Historia CIT/CTP
 	- Ewolucja metod detekcji kłamstwa jeśli chodzi o wykorzystanie EEG, ich wady, zalety, różnice.
-	- Na jakie markery ERP się patrzy (P300, N200 itp.) i dlaczego.
+	- Na jakie markery ERP się patrzy (P300 itp.) i dlaczego.
 	- Wyniki klasyfikacji różnych badań.
 	- Astepkty etyczne i prawne (neuroprawo).
 	- Tutaj dużo cytowań.
@@ -53,12 +53,7 @@
 	- Odrzucanie danych osób, które nie rozpoznały przedmiotu kradzieży (z grupy złodzieji) - dane z ankiety.
 
 8. Pipeline i preprocessing danych:
-
-	1. Opis, że bazujemy tylko na P300 nie włączamy N200 ze względu na:
-		- Różnice w N200 pomiędzy winnymi a niewinnymi mogą czasami wynikać ze słabego doboru samych bodźców (różnic w ich fizycznym/wizualnym wyglądzie) - dobrane pluszaki (ich zdjęcia) mogłyby zakłamać wynik;
-		- Wzmocniona fala N200 w odpowiedzi na bodziec Probe najsilniej pojawia się u osób o tzw. "wysokiej świadomości", czyli tych, które są mocno skupione na fakcie ukrywania informacji. Z ankiet końcowych wynika, że uczestnicy nie starali się ukryć informacji (pomimo powiedzenia im, że mają starać się ukryć informację kradzieży) - nie przekazano im żadnych informacji na temat counter-measures, sami równiez ich nie używali. Moje badanie nie ma na celu sprawdzenie radzenia sobie z counter-measures.
-	
-	2. Opis preprocessingu:
+	1. Opis preprocessingu:
 		1. **Aggressive filter (data rescue):**
 			- **Noth filter** - **50 Hz**.
 			- IIR Butterworth **0.5–30 Hz** (order 4) with steep rolloff. Designed to remove large slow-wave drift while preserving the P300 band. Wytłumaczyć dlaczego używamy takiego agresywniejszego filtra i dodać zdjęcie sygnału.
@@ -69,18 +64,21 @@
 		3. **Baseline correction:**
 			- Okres od -200 ms do 0 ms.
 			- Wytłumaczyć co i jak, dlaczego się to stosuje.
-		4. **Artifact Rejection:**
+		4. **Reject S1 based on S2 response**:
+			- Odrzucanie epok S1 na podstawie błędnych odpowiedzi (lub braku odpowiedzi po 1s) na bodźce z następującego w tym samym trialu zadania S2.
+		5. **Artifact Rejection:**
 			- W Python możemy użyć algorytmu `autoreject` (dla mniej niż 4 kanałów, czyli w naszym przypadku: `get_rejection_threshold` computes an optimal global µV threshold via Bayesian optimization, applies it, and shows the computed threshold value) - opis działania metody;
 			- dodanie, że zazwyczaj stosowana jest metoda ICA ale w naszym przypadku (niskiej ilości elektrod) nie jest możliwa i dlaczego.
-		5. **Wybór ostatecznego kanału do analizy:**
+		6. **Wybór ostatecznego kanału do analizy:**
 			- Głównym kanałem do analizy statystycznej powinien być **Pz**. Wytłumaczyć dlaczego, co i jak (występowanie P300).
-		6. **Wybieramy okno czasowe P300** - dopasowanie do uczestnika na bazie zadania S2 - targetu:
-			 1. Takie same parametry filtrów, preprocessingu i epochingu robimy na S2; 
+		7. **Wybieramy okno czasowe P300** - dopasowanie do uczestnika na bazie zadania S2 - targetu:
+			 1. Takie same parametry filtrów, preprocessingu i epochingu robimy na S2 (odrzucamy również triale z błędną odpowiedzią na zadanie lub jej brakiem); 
 			 2. Epoch smoothing (peak-based methods): 
 				- Smoothing applied to individual epochs before peak-based amplitude extraction (zero-phase Butterworth low-pass, with smoothing_lowpass_hz = **12 Hz**); Wytłumaczenie dlaczego używamy smoothing.
 			3. Finds the positive peak on a user-selected channel (default Pz) within a configurable search window
 			4. Returns `peak ± margin` (0.15 s) as the individualized time window
-		7. **Metoda BAD (Bootstrapped Amplitude Difference)**
+	2. **Klasyfikacja**:
+		1. **Metoda BAD (Bootstrapped Amplitude Difference)**
 			I. Epoch smoothing (peak-based methods): 
 				- Smoothing applied to individual epochs before peak-based amplitude extraction (zero-phase Butterworth low-pass, with smoothing_lowpass_hz = **12 Hz**)
 			II. Obliczamy średnią amplitudę w tym oknie P300 dla każdego pojedynczego triala S1.
@@ -91,15 +89,24 @@
 			- baseline-to-peak - max positive amplitude relative to zeroed baseline.
 			IV. Budujemy rozkład różnic i sprawdzamy, czy w co najmniej 80% przypadków różnica dla Probe jest istotnie statystycznie większa niż dla Irrelevant.
 			V. Porównujemy wyniki wszystkich (4) metod/sposobów BAD.
-		8. **Dodanie metod uczenia maszynowego: SVM i LDA (Liniowa Analiza Dyskryminacyjna)** - ze względu na niezbyt optymistyczne wyniki z BAD:
+		2. **Dodanie metod uczenia maszynowego: SVM i LDA (Liniowa Analiza Dyskryminacyjna)** - ze względu na niezbyt optymistyczne wyniki z BAD:
 			- Model wewnątrzosobniczy (Intra-subject) - trenujemy model na reakcjach z zadania S2 (Target/Nontarget), a następnie używamy go do predykcji na zadaniu S1 (Probe/Irrelevant).
 			- Cechy:
 				- **Dla modelu SVM:** wektor złożony z **wyekstrahowanych współczynników falkowych** dla całego okna fali P300 (np. po zastosowaniu DWT/WPT dla pasm 0.5–16 Hz) - standaryzacja zbioru. Falki **Daubechies (np. db4 lub db8)** oraz **Symlets (np. sym4 lub sym8)**; Poziom dekompozycji: **5**.
 				- **Dla modelu LDA:** ten sam **zestaw współczynników falkowych** oraz dorzucamy podstawowe statystyki (np. **stosunek amplitudy do latencji, peak-to-peak**), ale **stosujemy na nim algorytm selekcji cech (np. PCA, Stepwise LDA lub korelacje)**. Redukujemy zestaw z kilkudziesięciu/kilkuset parametrów falkowych do ok. 15-25 najsilniejszych cech i dopiero wtedy uczymy model LDA.
-		9. Obliczenie wyników metryk.
+		3. Obliczenie wyników metryk.
+	3. **Optymalizacja pipeline'u i walidacja modelu:**
+		1. **Zautomatyzowane poszukiwanie hiperparametrów (Optuna):**
+			- Wprowadzenie biblioteki Optuna i algorytmu TPE (Tree-structured Parzen Estimator). Wytłumaczenie, dlaczego zrezygnowano z ręcznego dobierania parametrów (ryzyko _p-hackingu_ i błędu poznawczego badacza) na rzecz zautomatyzowanej optymalizacji.
+			- **Przestrzeń poszukiwań** - Krótki opis, jakie parametry były optymalizowane (np. częstotliwości odcięcia filtrów IIR, marginesy czasowe okna P300 dla S2, progi odrzucania artefaktów).
+			- **Uzasadnienie metody badawczej** - Wyjaśnienie, że ze względu na małą próbę badawczą i użycie niskobudżetowego sprzętu (BrainAccess MINI), hiperparametry preprocessingu zostały zoptymalizowane _globalnie_ dla całej grupy. Celem było znalezienie "wspólnego mianownika" sprzętowego (optymalnych parametrów samego systemu pomiarowego dla metody CTP), ze świadomością, że niesie to ryzyko dopasowania do próby (co zostanie omówione w ograniczeniach pracy).
+		2. **Walidacja krzyżowa LOOCV (Leave-One-Out Cross-Validation) dla progu decyzyjnego:**
+			- Wytłumaczenie mechanizmu LOOCV: podział zbioru 12 osób na 11 osób trenujących i 1 osobę testowaną (powtarzane 12 razy).
+			- **Ustalanie progu BAD:** Wyjaśnienie, że optymalny próg odcięcia (threshold) dla klasyfikacji "złodziej/niewinny" w metodzie BAD nie był sztywno założony z góry. Był on każdorazowo dobierany na 11 uczestnikach z grupy uczącej tak, aby maksymalizować metrykę _Accuracy_ (Dokładność), a następnie aplikowany do 1 wyizolowanej osoby testowej.
+			- **Dlaczego LOOCV:** Argumentacja, że przy małych próbach (N=12) tradycyjny podział na zbiór treningowy i testowy (np. 80/20) pozostawiłby zbyt mało danych do wiarygodnego testowania. LOOCV pozwala na maksymalne wykorzystanie dostępnych danych uczących, zachowując przy tym rygor testowania na danych "niewidzianych" przez próg decyzyjny.
 	
 9. Porównanie wyników wszystkich modeli + wyników innych badań.
-   - Zestawienie wyników „guilty/innocent” w zależności od przyjętego progu ufności statystycznej dla wszystkich metod BAD, i AUC (dla ML).
+   - Zestawienie wyników „guilty/innocent” w zależności od przyjętego progu ufności statystycznej dla wszystkich metod BAD, ML.
 
 10. Przedstawienie jakości pobranych danych i ograniczeń sprzętowych:
 	- Przedstawienie statystyk, mean, std itp. pomiarów. Wykresy.
