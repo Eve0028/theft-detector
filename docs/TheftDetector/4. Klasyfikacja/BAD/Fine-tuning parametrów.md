@@ -1,3 +1,5 @@
+## 1. Parametry i ich zakresy
+
 1. Filtering:
 	- High-pass (Hz) -> [0.1, 0.3, 0.5, 0.7]
 	- Low-pass (Hz) -> [12.0, 15.0, 20.0, 30.0]
@@ -26,9 +28,7 @@
 	- Smoothing - smoothing is always applied when choosen amplitude method type is 'Peak' -> ['None', 'low-pass (butterworth)']
 	- Epoch smooth LP (Hz) -> [6.0, 8.0, 10.0, 12.0]
 
-
-### Optuna implementation
-#### Typy parametrów - przeszukiwanych
+### Typy parametrów - przeszukiwanych
 
 1. 'int':
 	- lp_cutoff: 12 - 30, step=3
@@ -46,19 +46,15 @@
 3. Pozostałe 'options'
 
 
-### Metryka optymalizacyjna - F-beta
+## 2. Optymalizacja parametrów jest wykonywana przez Optune na podstawie **AUC**
 
-Metryka **F-beta** to elastyczna wersja popularnego F1-score. Łączy ona w sobie dwie wartości:
-- **Precyzję (Precision):** Jak bardzo możemy ufać modelowi, gdy mówi "to jest złodziej"? (Maksymalizacja precyzji minimalizuje fałszywe alarmy - False Positives).
-- **Czułość (Recall):** Jak skutecznie model wyłapuje wszystkich faktycznych "złodziei" z grupy? (Maksymalizacja czułości minimalizuje przeoczenia - False Negatives).
-
-Parametr $\beta$ decyduje o tym, która z tych wartości jest dla nas ważniejsza:
-- **$\beta = 1.0$ (F1-Score):** Precyzja i Czułość są równie ważne.
-- **$\beta > 1.0$ (np. $\beta = 2.0$):** Czułość staje się ważniejsza. Karzemy model za przeoczenie złodzieja (przydatne np. w badaniach przesiewowych na raka, gdzie wolisz fałszywy alarm niż przeoczenie guza).
-- **$\beta < 1.0$ (np. $\beta = 0.5$):** Precyzja staje się ważniejsza. Karzemy model za fałszywe oskarżenia (False Positives). Waga $\beta = 0.5$ sprawia, że Precyzja ma dwukrotnie większy wpływ na ostateczny wynik niż Czułość.
+Dla każdego ze zbioru progów threahold (201 wartości od 0 do 1) kod robi:
+- „guilty” jeśli `max_proportion >= threshold`,
+- liczy TPR i FPR na całym zbiorze przy tym progu,
+potem składa krzywą ROC (przy wielu progach dających ten sam FPR bierze maksymalny TPR) i AUC = całka po FPR metodą trapezów.
 
 
-### Pipeline wyliczania 'threshold' i 'metryk końcowych' - LOO (Leave One Out) CV (wewnątrz triala optuny)
+## 3. LOO (Leave One Out) CV (wewnątrz triala optuny) - Pipeline wyliczania 'threshold' i 'metryk końcowych'
 
 1. Podział: Z grupy 12 uczestników wyciągamy jedną osobę (Zbiór Testowy). Pozostaje nam 11 uczestników (Zbiór Treningowy).
 2. Trening (Szukanie progu): Algorytm sprawdza wyniki metody BAD (np. wskaźnik max_proportion) dla tych 11 osób. Testuje 201 różnych progów odcięcia (np. próg 0.70, 0.75, 0.80...).
@@ -67,7 +63,7 @@ Parametr $\beta$ decyduje o tym, która z tych wartości jest dla nas ważniejsz
 5. Rotacja: Zwracamy osobę do puli, wyciągamy kolejną i powtarzamy cały proces od nowa (kroki 1-4). Powstanie 12 unikalnych modeli z potencjalnie 12 różnymi progami.
 6. Agregacja: Na koniec zliczamy wszystkie poprawne i niepoprawne klasyfikacje dla tych 12 niezależnych testów, obliczając ostateczną czułość, swoistość i dokładność całego pipeline'u.
 
-##### Szczegółowo
+#### Szczegółowo
 #### Krok 1: Przetwarzanie sygnału i ekstrakcja cechy (BAD)
 Dla danej iteracji Optuny (czyli dla konkretnego, wylosowanego zestawu filtrów):
 - Algorytm bierze nagranie `.fif` pierwszej osoby (np. „złodzieja”).
@@ -85,4 +81,13 @@ Teraz wkracza walidacja krzyżowa. LOOCV operuje **tylko na tych 12 liczbach**.
 3. Mając wyuczony próg, patrzy na wyciągnięty wynik `0.85` i ocenia: „Czy `0.85` jest większe lub równe progowi?”. Zapisuje trafienie (lub pomyłkę).
 4. Pętla wraca do początku, wyciągając kolejną z 12 liczb, i powtarza proces.
 
+### Metryka optymalizacyjna - F-beta - dla wyznaczenia threshold
 
+Metryka **F-beta** to elastyczna wersja popularnego F1-score. Łączy ona w sobie dwie wartości:
+- **Precyzję (Precision):** Jak bardzo możemy ufać modelowi, gdy mówi "to jest złodziej"? (Maksymalizacja precyzji minimalizuje fałszywe alarmy - False Positives).
+- **Czułość (Recall):** Jak skutecznie model wyłapuje wszystkich faktycznych "złodziei" z grupy? (Maksymalizacja czułości minimalizuje przeoczenia - False Negatives).
+
+Parametr $\beta$ decyduje o tym, która z tych wartości jest dla nas ważniejsza:
+- **$\beta = 1.0$ (F1-Score):** Precyzja i Czułość są równie ważne.
+- **$\beta > 1.0$ (np. $\beta = 2.0$):** Czułość staje się ważniejsza. Karzemy model za przeoczenie złodzieja (przydatne np. w badaniach przesiewowych na raka, gdzie wolisz fałszywy alarm niż przeoczenie guza).
+- **$\beta < 1.0$ (np. $\beta = 0.5$):** Precyzja staje się ważniejsza. Karzemy model za fałszywe oskarżenia (False Positives). Waga $\beta = 0.5$ sprawia, że Precyzja ma dwukrotnie większy wpływ na ostateczny wynik niż Czułość.
