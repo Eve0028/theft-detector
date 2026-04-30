@@ -46,12 +46,14 @@
 3. Pozostałe 'options'
 
 
+
 ## 2. Optymalizacja parametrów jest wykonywana przez Optune na podstawie **AUC**
 
 Dla każdego ze zbioru progów threahold (201 wartości od 0 do 1) kod robi:
 - „guilty” jeśli `max_proportion >= threshold`,
 - liczy TPR i FPR na całym zbiorze przy tym progu,
 potem składa krzywą ROC (przy wielu progach dających ten sam FPR bierze maksymalny TPR) i AUC = całka po FPR metodą trapezów.
+
 
 
 ## 3. LOO (Leave One Out) CV (wewnątrz triala optuny) - Pipeline wyliczania 'threshold' i 'metryk końcowych'
