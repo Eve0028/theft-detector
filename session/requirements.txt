@@ -38,3 +38,5 @@ scipy
 matplotlib
 autoreject
 
+optuna
+plotly

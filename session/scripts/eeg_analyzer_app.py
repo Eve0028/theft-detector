@@ -42,8 +42,14 @@ import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
 from pathlib import Path
+from itertools import product as _iter_product
 import io
+import json
+import os as _os
+import pickle
+import time as _time
 import traceback
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 try:
     import mne
@@ -57,6 +63,20 @@ try:
     _AUTOREJECT_AVAILABLE = True
 except ImportError:
     _AUTOREJECT_AVAILABLE = False
+
+try:
+    import optuna
+    optuna.logging.set_verbosity(optuna.logging.WARNING)
+    _OPTUNA_AVAILABLE = True
+except ImportError:
+    _OPTUNA_AVAILABLE = False
+
+try:
+    from optuna.visualization import plot_optimization_history
+    _OPTUNA_VIZ_AVAILABLE = True
+except ImportError:
+    plot_optimization_history = None  # type: ignore[misc, assignment]
+    _OPTUNA_VIZ_AVAILABLE = False
 
 from scipy.signal import butter, filtfilt
 
@@ -230,9 +250,12 @@ def apply_filters(raw, notch_freqs=None, lowcut=None, highcut=None,
         Low-pass filter cutoff (Hz).
     method : str
         ``'fir'`` (MNE default, linear-phase) or ``'iir'`` (Butterworth,
-        steeper rolloff — better for aggressive drift removal).
+        steeper rolloff — better for aggressive drift removal).  IIR
+        filtering uses zero-phase (forward-backward) ``sosfiltfilt`` to
+        avoid latency shifts of ERP components.
     iir_order : int
-        Butterworth filter order (used only when *method* is ``'iir'``).
+        Butterworth filter order per pass (used only when *method* is
+        ``'iir'``).  Even values recommended for zero-phase ``filtfilt``.
 
     Returns
     -------
@@ -247,7 +270,10 @@ def apply_filters(raw, notch_freqs=None, lowcut=None, highcut=None,
     filter_kwargs: dict = {'verbose': 'ERROR'}
     if method == 'iir':
         filter_kwargs['method'] = 'iir'
-        filter_kwargs['iir_params'] = {'order': iir_order, 'ftype': 'butter'}
+        filter_kwargs['iir_params'] = {
+            'order': iir_order, 'ftype': 'butter', 'output': 'sos',
+        }
+        filter_kwargs['phase'] = 'zero-double'
 
     if lowcut is not None and highcut is not None:
         raw_filtered.filter(lowcut, highcut, **filter_kwargs)
@@ -378,6 +404,92 @@ def create_epochs(raw, events, event_id, tmin, tmax, baseline,
     return epochs
 
 
+def _parse_s2_responses(raw):
+    """
+    Parse S2_response annotations from a raw EEG recording.
+
+    Extracts trial number, correctness, and reaction time from annotations
+    of the form ``S2_response|trial=N,key=...,rt=X.XXXX,correct=0|1``.
+
+    :param raw: Raw EEG data with annotations.
+    :type raw: mne.io.Raw
+    :return: Mapping ``{trial_number: {'correct': bool, 'rt': float}}``.
+    :rtype: dict[int, dict]
+    """
+    import re
+    s2_info = {}
+    for desc in raw.annotations.description:
+        if 'S2_response' not in desc:
+            continue
+        trial_m = re.search(r'trial=(\d+)', desc)
+        correct_m = re.search(r'correct=(\d)', desc)
+        rt_m = re.search(r'rt=([\d.]+)', desc)
+        if trial_m is None:
+            continue
+        trial_num = int(trial_m.group(1))
+        s2_info[trial_num] = {
+            'correct': bool(int(correct_m.group(1))) if correct_m else False,
+            'rt': float(rt_m.group(1)) if rt_m else np.nan,
+        }
+    return s2_info
+
+
+def reject_s1_by_s2_performance(epochs, raw, max_rt=None):
+    """
+    Drop S1 epochs whose associated S2 response was incorrect or too slow.
+
+    Each S1 epoch annotation contains ``trial=N``. The function looks up the
+    corresponding ``S2_response|trial=N`` annotation in *raw* and drops the
+    epoch when the S2 answer was wrong (``correct=0``) or the reaction time
+    exceeded *max_rt*.
+
+    :param epochs: Epochs with ``trial=N`` in event descriptions (S1 or S2).
+    :type epochs: mne.Epochs
+    :param raw: Raw recording with full annotations (including S2_response).
+    :type raw: mne.io.Raw
+    :param max_rt: Maximum allowed S2 reaction time (seconds). ``None`` to
+        skip the RT criterion.
+    :type max_rt: float or None
+    :return: ``(cleaned_epochs, n_dropped, drop_log)`` where *drop_log* is a
+        list of ``(epoch_index, trial_num, reason)`` tuples.
+    :rtype: tuple[mne.Epochs, int, list[tuple]]
+    """
+    import re
+
+    s2_info = _parse_s2_responses(raw)
+    if not s2_info:
+        return epochs, 0, []
+
+    rev_event_id = {v: k for k, v in epochs.event_id.items()}
+    drop_indices = []
+    drop_log = []
+
+    for idx in range(len(epochs)):
+        ev_code = epochs.events[idx, 2]
+        desc = rev_event_id.get(ev_code, '')
+        trial_m = re.search(r'trial=(\d+)', desc)
+        if trial_m is None:
+            continue
+        trial_num = int(trial_m.group(1))
+        info = s2_info.get(trial_num)
+        if info is None:
+            drop_indices.append(idx)
+            drop_log.append((idx, trial_num, 'no S2 response'))
+            continue
+        if not info['correct']:
+            drop_indices.append(idx)
+            drop_log.append((idx, trial_num, 'S2 incorrect'))
+            continue
+        if max_rt is not None and not np.isnan(info['rt']) and info['rt'] > max_rt:
+            drop_indices.append(idx)
+            drop_log.append((idx, trial_num, f"S2 RT {info['rt']:.3f}s > {max_rt}s"))
+
+    if drop_indices:
+        epochs = epochs.drop(drop_indices, reason='S2_performance')
+
+    return epochs, len(drop_indices), drop_log
+
+
 def adaptive_reject_epochs(epochs, method="iqr", k=3.0):
     """
     Remove artifact epochs using statistical outlier detection.
@@ -418,6 +530,47 @@ def adaptive_reject_epochs(epochs, method="iqr", k=3.0):
     return clean_epochs, n_dropped, ptp_max, keep_mask
 
 
+def reject_noisy_baseline(epochs, k=3.0):
+    """Reject epochs whose baseline window has abnormally high peak-to-peak.
+
+    A noisy baseline corrupts the baseline correction (mean subtraction),
+    shifting the entire post-stimulus waveform.  This check complements
+    autoreject / adaptive rejection, which evaluate the full epoch and
+    may miss baseline-specific artifacts (e.g. swallowing, blink tail).
+
+    The baseline window is taken from ``epochs.baseline``.  If no baseline
+    is set, the function returns the epochs unchanged.
+
+    Rejection uses an IQR criterion: epochs with baseline ptp >
+    Q3 + *k* * IQR are dropped.
+
+    :param epochs: Input epochs (not modified in-place).
+    :param k: IQR multiplier (lower = stricter).
+    :returns: ``(clean_epochs, n_dropped, keep_mask)``
+    """
+    bl = epochs.baseline
+    if bl is None:
+        return epochs, 0, np.ones(len(epochs), dtype=bool)
+
+    bl_start, bl_end = bl
+    times = epochs.times
+    bl_mask = (times >= bl_start) & (times <= bl_end)
+    if not bl_mask.any():
+        return epochs, 0, np.ones(len(epochs), dtype=bool)
+
+    data = epochs.get_data() * 1e6
+    bl_data = data[:, :, bl_mask]
+    bl_ptp = np.ptp(bl_data, axis=2).max(axis=1)
+
+    q1, q3 = np.percentile(bl_ptp, [25, 75])
+    iqr = q3 - q1
+    upper = q3 + k * iqr
+    keep_mask = bl_ptp <= upper
+    n_dropped = int((~keep_mask).sum())
+    clean = epochs[keep_mask]
+    return clean, n_dropped, keep_mask
+
+
 def _ensure_montage(inst):
     """
     Set a standard 10-20 montage if channel positions are missing.
@@ -444,6 +597,29 @@ def _ensure_montage(inst):
     if not matching:
         return
     inst.set_montage(montage, on_missing='ignore')
+
+
+def _apply_s1_style_global_rejection(epochs, s1_rejection, adaptive_k, ar_n_jobs=1):
+    """Global artifact stage matching ``run_pipeline`` S1 (after epoching).
+
+    Applies *adaptive_reject_epochs* for ``iqr`` / ``zscore``, or
+    *autoreject_clean_epochs* for ``autoreject``.  For ``static``, MNE
+    ``reject=`` is applied at epoch creation — this function is a no-op.
+    For ``none``, no second-stage rejection.
+
+    :returns: ``(epochs, autoreject_info)`` where *autoreject_info* is set
+        only when autoreject ran.
+    """
+    ar_info = None
+    if s1_rejection in ('iqr', 'zscore'):
+        epochs, _, _, _ = adaptive_reject_epochs(
+            epochs, method=s1_rejection, k=adaptive_k,
+        )
+    elif s1_rejection == 'autoreject' and _AUTOREJECT_AVAILABLE:
+        epochs, _, ar_info = autoreject_clean_epochs(
+            epochs, n_jobs=ar_n_jobs,
+        )
+    return epochs, ar_info
 
 
 def autoreject_clean_epochs(epochs, n_jobs=1, random_state=42):
@@ -675,15 +851,15 @@ def ctp_bad_analysis(
     epochs,
     tmin=0.3,
     tmax=0.6,
-    n_bootstrap=1000,
-    threshold=0.90,
+    n_bootstrap=10000,
+    threshold=0.75,
     channels=None,
     target_stim=None,
     baseline_stims=None,
-    amplitude_method='mean',
+    amplitude_method='peak_valley',
     p2p_tmax_negative=0.9,
     smoothing_method=None,
-    smoothing_lowpass_hz=6.0,
+    smoothing_lowpass_hz=12.0,
     smoothing_window_ms=100.0,
 ):
     """
@@ -700,7 +876,7 @@ def ctp_bad_analysis(
     n_bootstrap : int
         Bootstrap iterations.
     threshold : float
-        Guilty classification threshold (default 0.90).
+        Guilty classification threshold (default 0.75).
     channels : list of str or None
         Channel subset for analysis.  ``None`` uses all channels.
     target_stim : str or None
@@ -941,38 +1117,31 @@ def compute_individual_p300_window(
     s2_tmax=0.8,
     baseline=(-0.2, 0),
     peak_search_tmin=0.25,
-    peak_search_tmax=0.70,
+    peak_search_tmax=0.60,
     window_margin=0.15,
-    reject_threshold_uv=None,
     detrend=None,
     erp_lowpass_hz=None,
-    use_autoreject=False,
-    autoreject_n_jobs=1,
+    s1_rejection='autoreject',
+    s1_threshold_uv=None,
+    s1_adaptive_k=3.0,
+    ar_n_jobs=1,
+    s2_trial_rejection=False,
+    s2_max_rt=None,
 ):
     """
     Compute individualized P300 time window from S2 target responses.
 
-    1. Create epochs around ``S2_onset`` target events.
-    2. Optionally clean with *autoreject*.
-    3. Average to obtain the S2-target ERP.
-    4. Optionally low-pass filter the ERP for smoother peak detection.
-    5. Find the positive peak on *peak_channels* within
-       *[peak_search_tmin, peak_search_tmax]*.
-    6. Return the window *peak ± window_margin* for subsequent S1 analysis.
+    Rejection mirrors ``run_pipeline`` for S1: optional behavioural drops,
+    global *s1_rejection* (``autoreject`` / ``iqr`` / ``zscore`` /
+    ``static`` / ``none``), then :func:`reject_noisy_baseline` using
+    *s1_adaptive_k*.
 
     Parameters
     ----------
-    raw
-        Preprocessed EEG data.
-    events
-        MNE events array.
-    event_id
-        Full event_id mapping.
+    raw, events, event_id
+        Used to build S2-target :class:`mne.Epochs` on filtered data.
     peak_channels
-        Channel(s) used for peak detection.  A single string (e.g.
-        ``'Pz'``) or a list of strings (e.g. ``['Pz', 'Cz']``).
-        When multiple channels are given their ERP data is averaged
-        before peak detection (increases SNR).
+        Channel name(s) for peak picking; multiple channels are averaged.
     s2_tmin
         Epoch start relative to S2 onset (seconds).
     s2_tmax
@@ -985,28 +1154,31 @@ def compute_individual_p300_window(
         End of peak search window (seconds).
     window_margin
         Half-width of the individualized window (seconds).
-    reject_threshold_uv
-        Static artifact rejection threshold (µV).  Ignored when
-        *use_autoreject* is ``True``.
     detrend
-        Epoch detrend parameter.
+        Passed to :class:`mne.Epochs` (per-epoch detrend).
     erp_lowpass_hz
-        Low-pass cutoff (Hz) applied to the averaged ERP before peak
-        detection.  ``None`` disables smoothing.
-    use_autoreject
-        If ``True``, clean S2 epochs with :func:`autoreject_clean_epochs`
-        instead of the static threshold.
-    autoreject_n_jobs
-        Parallel jobs for autoreject cross-validation.
+        Low-pass on the averaged ERP before peak search; ``None`` skips.
+    s1_rejection
+        Global artifact policy (same as S1): ``autoreject``, ``iqr``,
+        ``zscore``, ``static``, ``none``.
+    s1_threshold_uv
+        MNE amplitude reject (µV) when *s1_rejection* is ``static``.
+    s1_adaptive_k
+        ``k`` for IQR/Z-score global rejection and baseline QC.
+    ar_n_jobs
+        Parallel jobs when *s1_rejection* is ``autoreject``.
+    s2_trial_rejection
+        Enable behavioural filtering via paired ``S2_response`` annotations.
+    s2_max_rt
+        Maximum allowed S2 reaction time (seconds).  ``None`` to skip
+        the RT criterion.  Only used when *s2_trial_rejection* is
+        ``True``.
 
     Returns
     -------
     dict
-        Keys: ``peak_time``, ``peak_amplitude``, ``peak_channel``,
-        ``window_start``, ``window_end``, ``window_margin``,
-        ``n_s2_epochs``, ``n_s2_epochs_before_ar``,
-        ``n_s2_epochs_after_ar``, ``autoreject_info``,
-        ``s2_erp``, ``s2_erp_smooth``.
+        Peak latency/amplitude, ``window_start`` / ``window_end``, ERPs,
+        epoch counts, ``autoreject_info``, behavioural drop log.
     """
     s2_target_ids = {
         k: v for k, v in event_id.items()
@@ -1019,8 +1191,8 @@ def compute_individual_p300_window(
         )
 
     reject = None
-    if not use_autoreject and reject_threshold_uv:
-        reject = dict(eeg=reject_threshold_uv * 1e-6)
+    if s1_rejection == 'static' and s1_threshold_uv:
+        reject = dict(eeg=s1_threshold_uv * 1e-6)
 
     s2_epochs = mne.Epochs(
         raw, events,
@@ -1036,17 +1208,40 @@ def compute_individual_p300_window(
     if len(s2_epochs) == 0:
         raise ValueError("No S2 target epochs remaining after artifact rejection.")
 
-    n_before_ar = len(s2_epochs)
-    ar_info = None
-
-    if use_autoreject and _AUTOREJECT_AVAILABLE:
-        s2_epochs, _, ar_info = autoreject_clean_epochs(
-            s2_epochs, n_jobs=autoreject_n_jobs,
+    n_s2_perf_dropped = 0
+    s2_perf_drop_log: list = []
+    if s2_trial_rejection:
+        s2_epochs, n_s2_perf_dropped, s2_perf_drop_log = (
+            reject_s1_by_s2_performance(
+                s2_epochs, raw, max_rt=s2_max_rt,
+            )
         )
         if len(s2_epochs) == 0:
             raise ValueError(
-                "No S2 target epochs remaining after autoreject."
+                "No S2 target epochs remaining after S2 performance "
+                f"rejection (dropped {n_s2_perf_dropped})."
             )
+
+    n_before_ar = len(s2_epochs)
+
+    s2_epochs, ar_info = _apply_s1_style_global_rejection(
+        s2_epochs,
+        s1_rejection=s1_rejection,
+        adaptive_k=s1_adaptive_k,
+        ar_n_jobs=ar_n_jobs,
+    )
+    if len(s2_epochs) == 0:
+        raise ValueError(
+            "No S2 target epochs remaining after S1-style global rejection."
+        )
+
+    s2_epochs, _, _ = reject_noisy_baseline(
+        s2_epochs, k=s1_adaptive_k,
+    )
+    if len(s2_epochs) == 0:
+        raise ValueError(
+            "No S2 target epochs remaining after baseline QC."
+        )
 
     n_after_ar = len(s2_epochs)
     s2_erp = s2_epochs.average()
@@ -1107,6 +1302,8 @@ def compute_individual_p300_window(
         'n_s2_epochs_before_ar': n_before_ar,
         'n_s2_epochs_after_ar': n_after_ar,
         'autoreject_info': ar_info,
+        'n_s2_perf_dropped': n_s2_perf_dropped,
+        's2_perf_drop_log': s2_perf_drop_log,
         's2_erp': s2_erp,
         's2_erp_smooth': s2_erp_smooth if erp_lowpass_hz is not None else None,
     }
@@ -1330,6 +1527,121 @@ def plot_psd_single_channel(raw, ch_name, raw_filtered=None, fmax=100):
     return fig
 
 
+def plot_s2_correct_vs_incorrect(raw, tmin=-0.2, tmax=0.8,
+                                 baseline=(-0.2, 0), detrend=0):
+    """
+    Create S2 epochs split by response correctness and plot the comparison.
+
+    :param raw: Raw EEG data with annotations.
+    :type raw: mne.io.Raw
+    :param tmin: Epoch start relative to S2 onset (seconds).
+    :type tmin: float
+    :param tmax: Epoch end relative to S2 onset (seconds).
+    :type tmax: float
+    :param baseline: Baseline correction window or ``None``.
+    :type baseline: tuple or None
+    :param detrend: Detrend mode — ``None``, ``0`` (DC offset), or ``1``
+        (linear). Default ``0``.
+    :type detrend: int or None
+    :return: ``(fig, stats)`` — matplotlib figure and a dict with epoch
+        counts (``n_correct``, ``n_incorrect``, ``n_no_response``).
+    :rtype: tuple[matplotlib.figure.Figure, dict]
+    """
+    import re
+
+    s2_info = _parse_s2_responses(raw)
+
+    s2_onset_descs = [
+        d for d in raw.annotations.description
+        if 's2_onset' in d.lower()
+    ]
+    if not s2_onset_descs:
+        return None, {'n_correct': 0, 'n_incorrect': 0, 'n_no_response': 0}
+
+    events, event_id = mne.events_from_annotations(raw, verbose='ERROR')
+    s2_event_id = {
+        k: v for k, v in event_id.items()
+        if 's2_onset' in k.lower()
+    }
+    if not s2_event_id:
+        return None, {'n_correct': 0, 'n_incorrect': 0, 'n_no_response': 0}
+
+    all_s2_epochs = mne.Epochs(
+        raw, events, event_id=s2_event_id,
+        tmin=tmin, tmax=tmax, baseline=baseline, detrend=detrend,
+        preload=True, verbose='ERROR',
+    )
+
+    rev_id = {v: k for k, v in all_s2_epochs.event_id.items()}
+    correct_idx = []
+    incorrect_idx = []
+    no_resp_idx = []
+    for idx in range(len(all_s2_epochs)):
+        ev_code = all_s2_epochs.events[idx, 2]
+        desc = rev_id.get(ev_code, '')
+        trial_m = re.search(r'trial=(\d+)', desc)
+        if trial_m is None:
+            continue
+        trial_num = int(trial_m.group(1))
+        info = s2_info.get(trial_num)
+        if info is None:
+            no_resp_idx.append(idx)
+        elif info['correct']:
+            correct_idx.append(idx)
+        else:
+            incorrect_idx.append(idx)
+
+    stats = {
+        'n_correct': len(correct_idx),
+        'n_incorrect': len(incorrect_idx),
+        'n_no_response': len(no_resp_idx),
+    }
+
+    has_correct = len(correct_idx) > 0
+    has_incorrect = len(incorrect_idx) > 0
+    if not has_correct and not has_incorrect:
+        return None, stats
+
+    data_all = all_s2_epochs.get_data() * 1e6
+    times_ms = all_s2_epochs.times * 1000
+    ch_names = all_s2_epochs.ch_names
+    n_ch = len(ch_names)
+
+    fig, axes = plt.subplots(n_ch, 1, figsize=(10, 3 * n_ch), sharex=True)
+    if n_ch == 1:
+        axes = [axes]
+
+    for ch_idx, (ch, ax) in enumerate(zip(ch_names, axes)):
+        if has_correct:
+            avg_ok = data_all[correct_idx, ch_idx, :].mean(axis=0)
+            sem_ok = (data_all[correct_idx, ch_idx, :].std(axis=0)
+                      / np.sqrt(len(correct_idx)))
+            ax.plot(times_ms, avg_ok, color='#2ca02c', linewidth=2,
+                    label=f'Correct (n={len(correct_idx)})')
+            ax.fill_between(times_ms, avg_ok - sem_ok, avg_ok + sem_ok,
+                            color='#2ca02c', alpha=0.15)
+        if has_incorrect:
+            avg_bad = data_all[incorrect_idx, ch_idx, :].mean(axis=0)
+            sem_bad = (data_all[incorrect_idx, ch_idx, :].std(axis=0)
+                       / np.sqrt(len(incorrect_idx)))
+            ax.plot(times_ms, avg_bad, color='#d62728', linewidth=2,
+                    label=f'Incorrect (n={len(incorrect_idx)})')
+            ax.fill_between(times_ms, avg_bad - sem_bad, avg_bad + sem_bad,
+                            color='#d62728', alpha=0.15)
+
+        ax.axvline(0, color='black', linestyle='--', linewidth=0.8)
+        ax.axhline(0, color='black', linestyle='-', linewidth=0.4)
+        ax.set_ylabel(f'{ch}\n(\u00b5V)')
+        ax.legend(loc='upper right', fontsize=8)
+        ax.grid(True, alpha=0.25)
+
+    axes[-1].set_xlabel('Time (ms)')
+    fig.suptitle('S2 ERP: Correct vs Incorrect Responses',
+                 fontsize=13, fontweight='bold')
+    plt.tight_layout()
+    return fig, stats
+
+
 def plot_epochs(epochs, n_epochs=20):
     """Plot individual epochs."""
     fig = epochs.plot(
@@ -1485,6 +1797,9 @@ def run_pipeline(raw, events, event_id, cfg):
         Event-ID mapping dict.
     cfg
         Dict with pipeline configuration keys (see Quick Pipeline page).
+        If ``s2_match_s1_preprocessing`` is ``True``, S2 target epochs for
+        the individual P300 window use ``s1_tmin``, ``s1_tmax``,
+        ``s1_baseline``, and ``s1_detrend`` instead of ``s2_*``.
 
     Returns
     -------
@@ -1501,8 +1816,8 @@ def run_pipeline(raw, events, event_id, cfg):
         raw_f = raw.copy()
         log.append("Filtering: skipped")
     elif filter_preset == 'aggressive':
-        agg_notch = cfg.get('notch_freqs', [50, 60])
-        agg_hp = cfg.get('hp_cutoff', 0.5)
+        agg_notch = cfg.get('notch_freqs', [50])
+        agg_hp = cfg.get('hp_cutoff', 0.7)
         agg_lp = cfg.get('lp_cutoff', 30.0)
         agg_order = cfg.get('iir_order', 4)
         raw_f = apply_filters(
@@ -1529,15 +1844,31 @@ def run_pipeline(raw, events, event_id, cfg):
         )
 
     # ------------------------------------------------------------------
-    # Step 2 — S2 Target epochs + rejection
+    # Step 2 — S2 epoching params (timing / baseline for individual window)
     # ------------------------------------------------------------------
-    s2_rej = cfg.get('s2_rejection', 'autoreject')
-    s2_tmin = cfg.get('s2_tmin', -0.2)
-    s2_tmax = cfg.get('s2_tmax', 0.8)
-    s2_baseline = (s2_tmin, 0) if cfg.get('s2_baseline', True) else None
     s2_detrend_map = {'None': None, 'DC offset (0)': 0, 'Linear (1)': 1}
-    s2_detrend = s2_detrend_map.get(cfg.get('s2_detrend', 'Linear (1)'), 1)
-    use_s2_ar = s2_rej == 'autoreject' and _AUTOREJECT_AVAILABLE
+    if cfg.get('s2_match_s1_preprocessing'):
+        s2_tmin = cfg.get('s1_tmin', -0.2)
+        s2_tmax = cfg.get('s1_tmax', 0.8)
+        s2_baseline = (
+            (s2_tmin, 0) if cfg.get('s1_baseline', True) else None
+        )
+        s2_detrend = s2_detrend_map.get(
+            cfg.get('s1_detrend', 'DC offset (0)'), 0,
+        )
+        log.append(
+            "S2 epoching mirrors S1 (tmin/tmax, baseline on/off, detrend)."
+        )
+    else:
+        s2_tmin = cfg.get('s2_tmin', -0.2)
+        s2_tmax = cfg.get('s2_tmax', 0.8)
+        s2_baseline = (
+            (s2_tmin, 0) if cfg.get('s2_baseline', True) else None
+        )
+        s2_detrend = s2_detrend_map.get(
+            cfg.get('s2_detrend', 'DC offset (0)'), 0,
+        )
+    s1_rej = cfg.get('s1_rejection', 'autoreject')
 
     # ------------------------------------------------------------------
     # Step 3 — Individual P300 window
@@ -1548,26 +1879,42 @@ def run_pipeline(raw, events, event_id, cfg):
     if use_individual:
         ip_result = compute_individual_p300_window(
             raw_f, events, event_id,
-            peak_channels=cfg.get('peak_channels', ['Pz', 'Cz']),
+            peak_channels=cfg.get('peak_channels', ['Pz']),
             s2_tmin=s2_tmin,
             s2_tmax=s2_tmax,
             baseline=s2_baseline,
             peak_search_tmin=cfg.get('peak_search_tmin', 0.25),
-            peak_search_tmax=cfg.get('peak_search_tmax', 0.70),
+            peak_search_tmax=cfg.get('peak_search_tmax', 0.60),
             window_margin=cfg.get('window_margin', 0.15),
-            reject_threshold_uv=(
-                cfg.get('s2_threshold_uv') if s2_rej == 'static' else None
-            ),
             detrend=s2_detrend,
             erp_lowpass_hz=cfg.get('s2_erp_lowpass_hz'),
-            use_autoreject=use_s2_ar,
-            autoreject_n_jobs=cfg.get('ar_n_jobs', 1),
+            s1_rejection=s1_rej,
+            s1_threshold_uv=(
+                cfg.get('s1_threshold_uv') if s1_rej == 'static' else None
+            ),
+            s1_adaptive_k=cfg.get('s1_adaptive_k', 3.0),
+            ar_n_jobs=cfg.get('ar_n_jobs', 1),
+            s2_trial_rejection=cfg.get('s2_trial_rejection', True),
+            s2_max_rt=cfg.get('s2_max_rt'),
         )
         p300_tmin = ip_result['window_start']
         p300_tmax = ip_result['window_end']
+        n_perf = ip_result.get('n_s2_perf_dropped', 0)
+        if n_perf:
+            perf_reasons: dict = {}
+            for _, _, r in ip_result.get('s2_perf_drop_log', []):
+                perf_reasons[r] = perf_reasons.get(r, 0) + 1
+            perf_str = ', '.join(
+                f'{r}: {c}' for r, c in perf_reasons.items()
+            )
+            log.append(
+                f"S2 performance rejection: dropped {n_perf} "
+                f"({perf_str})"
+            )
         log.append(
             f"S2 epochs: {ip_result['n_s2_epochs_before_ar']} → "
-            f"{ip_result['n_s2_epochs_after_ar']} (rejection: {s2_rej})"
+            f"{ip_result['n_s2_epochs_after_ar']} "
+            f"(S1-style rejection: {s1_rej})"
         )
         log.append(
             f"Individual window: {p300_tmin*1000:.0f}–{p300_tmax*1000:.0f} ms "
@@ -1588,8 +1935,7 @@ def run_pipeline(raw, events, event_id, cfg):
     s1_tmin = cfg.get('s1_tmin', -0.2)
     s1_tmax = cfg.get('s1_tmax', 0.8)
     s1_baseline = (s1_tmin, 0) if cfg.get('s1_baseline', True) else None
-    s1_detrend = s2_detrend_map.get(cfg.get('s1_detrend', 'Linear (1)'), 1)
-    s1_rej = cfg.get('s1_rejection', 'autoreject')
+    s1_detrend = s2_detrend_map.get(cfg.get('s1_detrend', 'DC offset (0)'), 0)
 
     s1_static_thresh = (
         cfg.get('s1_threshold_uv') if s1_rej == 'static' else None
@@ -1603,6 +1949,28 @@ def run_pipeline(raw, events, event_id, cfg):
     )
     n_s1_before = len(epochs)
 
+    # S2-performance-based rejection (drop S1 trials with incorrect /
+    # too-slow S2 responses) — applied before artifact rejection so that
+    # only behaviourally valid trials enter the analysis.
+    s2_reject = cfg.get('s2_trial_rejection', True)
+    s2_max_rt = cfg.get('s2_max_rt')
+    n_s2_dropped = 0
+    s2_drop_log = []
+    if s2_reject:
+        epochs, n_s2_dropped, s2_drop_log = reject_s1_by_s2_performance(
+            epochs, raw, max_rt=s2_max_rt,
+        )
+        n_after_s2 = len(epochs)
+        reasons = {}
+        for _, _, reason in s2_drop_log:
+            reasons[reason] = reasons.get(reason, 0) + 1
+        reason_str = ', '.join(f'{r}: {c}' for r, c in reasons.items())
+        log.append(
+            f"S2 trial rejection: {n_s1_before} → {n_after_s2} "
+            f"(dropped {n_s2_dropped}: {reason_str or 'none'})"
+        )
+        n_s1_before = n_after_s2
+
     if s1_rej in ('iqr', 'zscore'):
         epochs, _, _, _ = adaptive_reject_epochs(
             epochs,
@@ -1614,9 +1982,16 @@ def run_pipeline(raw, events, event_id, cfg):
             epochs, n_jobs=cfg.get('ar_n_jobs', 1),
         )
 
+    n_after_art = len(epochs)
+
+    epochs, n_bl_dropped, _ = reject_noisy_baseline(
+        epochs, k=cfg.get('s1_adaptive_k', 3.0),
+    )
+
     n_s1_after = len(epochs)
     log.append(
-        f"S1 epochs: {n_s1_before} → {n_s1_after} (rejection: {s1_rej})"
+        f"S1 epochs: {n_s1_before} → {n_after_art} (rejection: {s1_rej})"
+        f" → {n_s1_after} (baseline QC: dropped {n_bl_dropped})"
     )
 
     if n_s1_after == 0:
@@ -1647,6 +2022,14 @@ def run_pipeline(raw, events, event_id, cfg):
             for s in _bl_stims if f'stim_id={s}' in k
             and 's1_onset' in k.lower()
         ]
+    n_probe = len(epochs[_probe_keys]) if _probe_keys else 0
+    min_probe = cfg.get('min_probe_epochs', _MIN_PROBE_EPOCHS)
+    if n_probe < min_probe:
+        raise ValueError(
+            f"Only {n_probe} probe epochs remaining (minimum {min_probe}). "
+            f"P300 SNR too low — recording rejected."
+        )
+
     probe_erp = (
         epochs[_probe_keys].average() if _probe_keys else None
     )
@@ -1676,22 +2059,22 @@ def run_pipeline(raw, events, event_id, cfg):
 
     bad_channels = cfg.get(
         'bad_channels',
-        cfg.get('peak_channels', ['Pz', 'Cz']),
+        cfg.get('peak_channels', ['Pz']),
     )
 
     bad_results = ctp_bad_analysis(
         epochs,
         tmin=p300_tmin,
         tmax=p300_tmax,
-        n_bootstrap=cfg.get('n_bootstrap', 1000),
-        threshold=cfg.get('guilty_threshold', 0.90),
+        n_bootstrap=cfg.get('n_bootstrap', 10000),
+        threshold=cfg.get('guilty_threshold', 0.75),
         channels=bad_channels,
         target_stim=cfg.get('target_stim'),
         baseline_stims=cfg.get('baseline_stims'),
         amplitude_method=amp_method,
         p2p_tmax_negative=cfg.get('p2p_tmax_negative', 0.9),
         smoothing_method=smooth_method,
-        smoothing_lowpass_hz=cfg.get('smoothing_lp_hz', 6.0),
+        smoothing_lowpass_hz=cfg.get('smoothing_lp_hz', 12.0),
         smoothing_window_ms=cfg.get('smoothing_ma_ms', 100.0),
     )
 
@@ -1713,6 +2096,8 @@ def run_pipeline(raw, events, event_id, cfg):
         'p300_tmax': p300_tmax,
         'n_s1_before': n_s1_before,
         'n_s1_after': n_s1_after,
+        'n_s2_dropped': n_s2_dropped,
+        's2_drop_log': s2_drop_log,
         'log': log,
     }
 
@@ -1861,7 +2246,7 @@ def _display_pipeline_results(result):
     # --- Per-channel results ---
     with st.expander("Per-channel CTP-BAD results", expanded=True):
         st.dataframe(
-            bad['channel_results'], use_container_width=True,
+            bad['channel_results'], width='stretch',
         )
 
     # --- Bootstrap chart ---
@@ -1950,7 +2335,7 @@ def _display_batch_results(batch_results):
         })
 
     df_summary = pd.DataFrame(rows)
-    st.dataframe(df_summary, use_container_width=True)
+    st.dataframe(df_summary, width='stretch')
 
     # Counts
     n_guilty = sum(
@@ -2001,6 +2386,1187 @@ def _display_batch_results(batch_results):
             _display_pipeline_results(r)
 
 
+def _display_grouped_batch_results(
+    batch_results,
+    loocv_evaluation=False,
+    fbeta_weight=1.0,
+):
+    """Render grouped batch results with ground-truth-based metrics.
+
+    Each element in *batch_results* must carry a ``ground_truth`` key
+    (``'guilty'`` or ``'innocent'``).
+
+    Parameters
+    ----------
+    batch_results
+        Per-file pipeline outputs including ``bad_results`` and labels.
+    loocv_evaluation
+        When True, leave-one-out thresholding on ``max_proportion``
+        (same scheme as Grid Search LOOCV).
+    fbeta_weight
+        β for F-score when selecting cutoffs on training folds.
+    """
+    st.markdown("---")
+    loocv_metrics = None
+    if loocv_evaluation:
+        st.subheader("LOOCV evaluation")
+        st.caption(
+            "Each fold: choose a cutoff on the other subjects' "
+            "**max_proportion** scores (maximize F-β), apply it to the "
+            "held-out subject. The pipeline **Guilty threshold** is not "
+            "used for these metrics. Requires more than two valid files."
+        )
+        _loo_valid = [r for r in batch_results if 'error' not in r]
+        _loo_failed = len(batch_results) - len(_loo_valid)
+        if _loo_failed:
+            st.caption(
+                f"{_loo_failed} file(s) skipped by LOOCV (pipeline error)."
+            )
+        if len(_loo_valid) <= 2:
+            st.warning(
+                "LOOCV needs more than two successful recordings."
+            )
+        else:
+            loocv_metrics = _score_combo(
+                batch_results,
+                use_loocv=True,
+                fbeta_weight=fbeta_weight,
+            )
+            lv1, lv2, lv3, lv4, lv5 = st.columns(5)
+            lv1.metric("ROC-AUC", f"{loocv_metrics['auc']:.4f}")
+            lv2.metric("F-β (LOOCV preds)", f"{loocv_metrics['fbeta']:.4f}")
+            lv3.metric("Accuracy", f"{loocv_metrics['accuracy']:.1%}")
+            lv4.metric("Sensitivity", f"{loocv_metrics['sensitivity']:.1%}")
+            lv5.metric("Specificity", f"{loocv_metrics['specificity']:.1%}")
+            st.caption(
+                "Reference: threshold maximizing F-β on **all** scores "
+                f"jointly = {loocv_metrics['best_threshold']:.4f} "
+                "(ROC marker); F-β at that threshold on all subjects = "
+                f"{loocv_metrics.get('fbeta_resubstitution', 0):.4f}."
+            )
+            ltp = loocv_metrics['tp']
+            lfn = loocv_metrics['fn']
+            lfp = loocv_metrics['fp']
+            ltn = loocv_metrics['tn']
+            st.markdown("**LOOCV confusion matrix**")
+            st.dataframe(
+                pd.DataFrame(
+                    [[ltp, lfn], [lfp, ltn]],
+                    index=['Actual GUILTY', 'Actual INNOCENT'],
+                    columns=['Pred. GUILTY', 'Pred. INNOCENT'],
+                ),
+                width='stretch',
+            )
+
+            _loo_detail = loocv_metrics.get('loocv_per_subject') or []
+            if _loo_detail:
+                n_ok = sum(1 for row in _loo_detail if row['correct'])
+                st.markdown(
+                    f"**Fold summary:** {n_ok}/{len(_loo_detail)} participants "
+                    "correct under LOOCV; "
+                    f"F-β weight for threshold search on training folds = "
+                    f"**{fbeta_weight:.2f}**."
+                )
+                st.markdown(
+                    "_For documentation:_ One row = one LOOCV fold. "
+                    "**Training threshold** maximizes F-β using only the "
+                    "other participants' **max_proportion** scores. "
+                    "**Predicted** = GUILTY if held-out "
+                    "max_proportion ≥ that threshold. "
+                    "**Margin** = score − threshold (distance to boundary; "
+                    "negative ⇒ below threshold)."
+                )
+                _df_loo = pd.DataFrame([
+                    {
+                        'File': row['filename'],
+                        'Ground truth': row['ground_truth'],
+                        'Max proportion': round(row['max_proportion'], 6),
+                        'Max prop. (%)': round(row['max_proportion'] * 100, 2),
+                        'Training threshold': round(
+                            row['train_selected_threshold'], 6,
+                        ),
+                        'Margin (score − thr.)': round(
+                            row['score_minus_threshold'], 6,
+                        ),
+                        'Predicted': row['predicted'],
+                        'Correct': '\u2713' if row['correct'] else '\u2717',
+                    }
+                    for row in _loo_detail
+                ]).sort_values('File', kind='stable')
+                with st.expander(
+                    "Per-participant LOOCV table (thesis / appendix)",
+                    expanded=False,
+                ):
+                    st.dataframe(_df_loo, width='stretch')
+                    st.download_button(
+                        "Download LOOCV per-participant table (CSV)",
+                        data=_df_loo.to_csv(index=False),
+                        file_name="loocv_per_participant_details.csv",
+                        mime="text/csv",
+                        key="qp_loocv_participant_csv_dl",
+                    )
+
+                _wrong = [row for row in _loo_detail if not row['correct']]
+                if _wrong:
+                    with st.expander(
+                        f"Misclassified under LOOCV ({len(_wrong)} file(s))",
+                        expanded=True,
+                    ):
+                        st.markdown(
+                            "These recordings received the wrong binary label "
+                            "when their score was compared to the threshold "
+                            "learned without them."
+                        )
+                        for w in sorted(_wrong, key=lambda x: x['filename']):
+                            st.markdown(
+                                f"- **`{w['filename']}`** — ground truth "
+                                f"**{w['ground_truth']}**, predicted "
+                                f"**{w['predicted']}** "
+                                f"(max_prop={w['max_proportion']:.4f}, "
+                                f"training_thr={w['train_selected_threshold']:.4f}, "
+                                f"margin={w['score_minus_threshold']:+.4f})"
+                            )
+                else:
+                    st.success(
+                        "No LOOCV misclassifications "
+                        f"({len(_loo_detail)} folds)."
+                    )
+        st.markdown("---")
+
+    st.subheader("Grouped Batch Results")
+
+    rows = []
+    for r in batch_results:
+        gt = r['ground_truth'].upper()
+        if 'error' in r:
+            rows.append({
+                'File': r['filename'],
+                'Ground Truth': gt,
+                'Classification': 'ERROR',
+                'p-value': None,
+                'Max Prop. (%)': None,
+                'Best Channel': None,
+                'S2 Epochs': None,
+                'Ind. Window (ms)': None,
+                'S1 Epochs': None,
+                'Correct': None,
+                'Error': r['error'],
+            })
+            continue
+        bad = r['bad_results']
+        ip = r.get('individual_p300_window')
+        classification = bad['overall_classification']
+        correct = (
+            (gt == 'GUILTY' and classification == 'GUILTY')
+            or (gt == 'INNOCENT' and classification == 'INNOCENT')
+        )
+        rows.append({
+            'File': r['filename'],
+            'Ground Truth': gt,
+            'Classification': classification,
+            'p-value': round(bad['p_value'], 4),
+            'Max Prop. (%)': round(bad['max_proportion'] * 100, 1),
+            'Best Channel': bad['max_channel'],
+            'S2 Epochs': (
+                ip['n_s2_epochs_after_ar'] if ip else '—'
+            ),
+            'Ind. Window (ms)': (
+                f"{ip['window_start']*1000:.0f}–"
+                f"{ip['window_end']*1000:.0f}" if ip else '—'
+            ),
+            'S1 Epochs': r['n_s1_after'],
+            'Correct': '\u2713' if correct else '\u2717',
+            'Error': '',
+        })
+
+    df_summary = pd.DataFrame(rows)
+    if loocv_evaluation:
+        st.caption(
+            "Per-file Classification uses the pipeline Guilty threshold "
+            "(Step 5); LOOCV above uses score-based cutoffs instead."
+        )
+    st.dataframe(df_summary, width='stretch')
+
+    # ------------------------------------------------------------------
+    # Confusion matrix & classification metrics
+    # ------------------------------------------------------------------
+    valid = [r for r in batch_results if 'error' not in r]
+    n_error = len(batch_results) - len(valid)
+
+    if valid:
+        tp = sum(
+            1 for r in valid
+            if r['ground_truth'] == 'guilty'
+            and r['bad_results']['overall_classification'] == 'GUILTY'
+        )
+        fn = sum(
+            1 for r in valid
+            if r['ground_truth'] == 'guilty'
+            and r['bad_results']['overall_classification'] == 'INNOCENT'
+        )
+        fp = sum(
+            1 for r in valid
+            if r['ground_truth'] == 'innocent'
+            and r['bad_results']['overall_classification'] == 'GUILTY'
+        )
+        tn = sum(
+            1 for r in valid
+            if r['ground_truth'] == 'innocent'
+            and r['bad_results']['overall_classification'] == 'INNOCENT'
+        )
+
+        n_total = tp + tn + fp + fn
+        accuracy = (tp + tn) / n_total if n_total else 0.0
+        sensitivity = tp / (tp + fn) if (tp + fn) else 0.0
+        specificity = tn / (tn + fp) if (tn + fp) else 0.0
+        precision = tp / (tp + fp) if (tp + fp) else 0.0
+        f1 = (
+            2 * precision * sensitivity / (precision + sensitivity)
+            if (precision + sensitivity) else 0.0
+        )
+
+        st.subheader(
+            "Classification metrics (pipeline guilty threshold)",
+        )
+        cm_col, metric_col = st.columns(2)
+
+        with cm_col:
+            st.markdown("**Confusion Matrix**")
+            cm_df = pd.DataFrame(
+                [[tp, fn], [fp, tn]],
+                index=['Actual GUILTY', 'Actual INNOCENT'],
+                columns=['Pred. GUILTY', 'Pred. INNOCENT'],
+            )
+            st.dataframe(cm_df, width='stretch')
+
+        with metric_col:
+            st.markdown("**Performance Metrics**")
+            m1, m2 = st.columns(2)
+            m1.metric("Accuracy", f"{accuracy:.1%}")
+            m2.metric("F1 Score", f"{f1:.1%}")
+            m3, m4 = st.columns(2)
+            m3.metric("Sensitivity (TPR)", f"{sensitivity:.1%}")
+            m4.metric("Specificity (TNR)", f"{specificity:.1%}")
+            m5, m6 = st.columns(2)
+            m5.metric("Precision (PPV)", f"{precision:.1%}")
+            m6.metric("N (valid)", n_total)
+
+        st.subheader("Group Breakdown")
+        g1, g2, g3 = st.columns(3)
+        g1.metric("Guilty files", tp + fn)
+        g2.metric("Innocent files", tn + fp)
+        if n_error:
+            g3.metric("Errors", n_error)
+        else:
+            g3.metric("Total valid", n_total)
+
+    # ------------------------------------------------------------------
+    # CSV export
+    # ------------------------------------------------------------------
+    csv_buf = io.StringIO()
+    csv_buf.write(
+        f"# Grouped Batch CTP-BAD Results — {pd.Timestamp.now()}\n"
+    )
+    df_summary.to_csv(csv_buf, index=False)
+
+    if loocv_metrics is not None:
+        csv_buf.write("\n# LOOCV evaluation (max_proportion scores)\n")
+        pd.DataFrame([{
+            'ROC_AUC': f"{loocv_metrics['auc']:.6f}",
+            'Fbeta_LOOCV_predictions': f"{loocv_metrics['fbeta']:.6f}",
+            'Fbeta_resubstitution_at_full_sample_threshold': (
+                f"{loocv_metrics.get('fbeta_resubstitution', 0):.6f}"
+            ),
+            'Full_sample_Fbeta_threshold': (
+                f"{loocv_metrics['best_threshold']:.6f}"
+            ),
+            'Accuracy': f"{loocv_metrics['accuracy']:.6f}",
+            'Sensitivity': f"{loocv_metrics['sensitivity']:.6f}",
+            'Specificity': f"{loocv_metrics['specificity']:.6f}",
+            'TP': loocv_metrics['tp'],
+            'FN': loocv_metrics['fn'],
+            'FP': loocv_metrics['fp'],
+            'TN': loocv_metrics['tn'],
+            'Fbeta_weight': fbeta_weight,
+        }]).to_csv(csv_buf, index=False)
+        _loo_rows = loocv_metrics.get('loocv_per_subject')
+        if _loo_rows:
+            csv_buf.write(
+                "\n# LOOCV per-participant fold details "
+                "(same order as folds in UI table; sorted by file "
+                "name in downloadable snippet)\n",
+            )
+            pd.DataFrame(_loo_rows).sort_values(
+                'filename', kind='stable',
+            ).to_csv(csv_buf, index=False)
+
+    if valid:
+        csv_buf.write(
+            "\n# Classification metrics (pipeline guilty threshold)\n",
+        )
+        metrics_df = pd.DataFrame([{
+            'Accuracy': f"{accuracy:.4f}",
+            'Sensitivity_TPR': f"{sensitivity:.4f}",
+            'Specificity_TNR': f"{specificity:.4f}",
+            'Precision_PPV': f"{precision:.4f}",
+            'F1_Score': f"{f1:.4f}",
+            'TP': tp, 'FN': fn, 'FP': fp, 'TN': tn,
+            'N_valid': n_total,
+        }])
+        metrics_df.to_csv(csv_buf, index=False)
+
+    st.download_button(
+        "Download grouped batch summary (CSV)",
+        data=csv_buf.getvalue(),
+        file_name="grouped_batch_ctp_bad_results.csv",
+        mime="text/csv",
+        key="grouped_batch_csv_dl",
+    )
+
+    # ------------------------------------------------------------------
+    # Per-file details
+    # ------------------------------------------------------------------
+    st.subheader("Per-file Details")
+    for r in batch_results:
+        fname = r['filename']
+        gt = r['ground_truth'].upper()
+        if 'error' in r:
+            with st.expander(f"\u274c {fname} [{gt}] — ERROR"):
+                st.error(r['error'])
+            continue
+        bad = r['bad_results']
+        classification = bad['overall_classification']
+        correct = (
+            (gt == 'GUILTY' and classification == 'GUILTY')
+            or (gt == 'INNOCENT' and classification == 'INNOCENT')
+        )
+        icon = "\u2705" if correct else "\u26a0\ufe0f"
+        with st.expander(
+            f"{icon} {fname} [{gt}] \u2192 "
+            f"{classification} (p={bad['p_value']:.4f})"
+        ):
+            _display_pipeline_results(r)
+
+
+# ============================================================================
+# Grid Search / Optuna Helpers
+# ============================================================================
+
+_MIN_PROBE_EPOCHS = 25
+_ROC_THRESHOLDS = np.linspace(0.0, 1.0, 201)
+
+_FILTER_PRESET_TO_WIDGET = {
+    'skip': 'Skip',
+    'aggressive': 'Aggressive (data rescue)',
+    'custom': 'Custom',
+}
+_REJ_TO_WIDGET = {
+    'none': 'None',
+    'static': 'Static threshold',
+    'iqr': 'Adaptive: IQR',
+    'zscore': 'Adaptive: Z-score',
+    'autoreject': 'Autoreject (ML-based)',
+}
+
+
+def _cfg_to_json(cfg):
+    """Serialize a pipeline config dict to a JSON string.
+
+    Skips keys whose values are not JSON-serializable.
+    """
+    safe = {}
+    for k, v in cfg.items():
+        if callable(v):
+            continue
+        try:
+            json.dumps(v)
+            safe[k] = v
+        except (TypeError, ValueError):
+            continue
+    return json.dumps(safe, indent=2, ensure_ascii=False)
+
+
+def _apply_config_to_widgets(cfg):
+    """Map a pipeline config dict to Quick Pipeline widget session-state keys.
+
+    Must be called **before** the widgets render so that Streamlit picks
+    up the pre-set values.  Caller should ``st.rerun()`` afterwards.
+    """
+    ss = st.session_state
+
+    fp = cfg.get('filter_preset', 'aggressive')
+    ss['pipe_filter_preset'] = _FILTER_PRESET_TO_WIDGET.get(fp, fp)
+
+    hp = cfg.get('hp_cutoff', 0.7)
+    lp = cfg.get('lp_cutoff', 30.0)
+    order = cfg.get('iir_order', 4)
+    notch = cfg.get('notch_freqs') or []
+    for key in ('pipe_hp_agg', 'pipe_hp'):
+        ss[key] = float(hp)
+    for key in ('pipe_lp_agg', 'pipe_lp'):
+        ss[key] = float(lp)
+    for key in ('pipe_iir_order_agg', 'pipe_iir_order'):
+        ss[key] = int(order)
+    for key in ('pipe_notch_agg', 'pipe_notch'):
+        ss[key] = notch
+    ss['pipe_fmethod'] = cfg.get('filter_method', 'iir')
+
+    # S2 epochs
+    ss['pipe_s2_tmin'] = float(cfg.get('s2_tmin', -0.2))
+    ss['pipe_s2_tmax'] = float(cfg.get('s2_tmax', 0.8))
+    ss['pipe_s2_bl'] = bool(cfg.get('s2_baseline', True))
+    ss['pipe_s2_detrend'] = cfg.get('s2_detrend', 'DC offset (0)')
+    s2r = cfg.get('s2_rejection', 'autoreject')
+    ss['pipe_s2_rej'] = _REJ_TO_WIDGET.get(s2r, s2r)
+    if cfg.get('s2_threshold_uv') is not None:
+        ss['pipe_s2_thresh'] = float(cfg['s2_threshold_uv'])
+
+    # Individual P300 window
+    ss['pipe_use_iw'] = bool(cfg.get('use_individual_window', True))
+    ss['pipe_search_min'] = float(cfg.get('peak_search_tmin', 0.25))
+    ss['pipe_search_max'] = float(cfg.get('peak_search_tmax', 0.60))
+    ss['pipe_margin'] = float(cfg.get('window_margin', 0.15))
+    erp_lp = cfg.get('s2_erp_lowpass_hz')
+    ss['pipe_s2_erp_lp_en'] = erp_lp is not None
+    if erp_lp is not None:
+        ss['pipe_s2_erp_lp_hz'] = float(erp_lp)
+    if cfg.get('peak_channels'):
+        ss['pipe_peak_chs'] = list(cfg['peak_channels'])
+    ss['pipe_man_tmin'] = float(cfg.get('manual_tmin', 0.3))
+    ss['pipe_man_tmax'] = float(cfg.get('manual_tmax', 0.6))
+
+    # S1 epochs
+    ss['pipe_s1_tmin'] = float(cfg.get('s1_tmin', -0.2))
+    ss['pipe_s1_tmax'] = float(cfg.get('s1_tmax', 0.8))
+    ss['pipe_s1_bl'] = bool(cfg.get('s1_baseline', True))
+    ss['pipe_s1_detrend'] = cfg.get('s1_detrend', 'DC offset (0)')
+    s1r = cfg.get('s1_rejection', 'autoreject')
+    ss['pipe_s1_rej'] = _REJ_TO_WIDGET.get(s1r, s1r)
+    if cfg.get('s1_threshold_uv') is not None:
+        ss['pipe_s1_thresh'] = float(cfg['s1_threshold_uv'])
+    ss['pipe_s1_k'] = float(cfg.get('s1_adaptive_k', 3.0))
+
+    # S2 trial rejection
+    ss['pipe_s2_trial_rej'] = bool(cfg.get('s2_trial_rejection', True))
+    s2_max_rt = cfg.get('s2_max_rt')
+    ss['pipe_s2_max_rt_en'] = s2_max_rt is not None
+    if s2_max_rt is not None:
+        ss['pipe_s2_max_rt'] = float(s2_max_rt)
+
+    # BAD channels
+    peak_chs = cfg.get('peak_channels', ['Pz'])
+    bad_chs = cfg.get('bad_channels')
+    if bad_chs and bad_chs != peak_chs:
+        ss['pipe_bad_chs_override'] = True
+        ss['pipe_bad_chs'] = list(bad_chs)
+    else:
+        ss['pipe_bad_chs_override'] = False
+
+    # Amplitude / smoothing / bootstrap
+    ss['pipe_amp_method'] = cfg.get(
+        'amplitude_method', 'Peak-to-Peak (Peak-Valley)',
+    )
+    if cfg.get('p2p_tmax_negative') is not None:
+        ss['pipe_p2p_neg'] = float(cfg['p2p_tmax_negative'])
+    ss['pipe_smooth_method'] = cfg.get(
+        'smoothing_method', 'Low-pass (Butterworth)',
+    )
+    if cfg.get('smoothing_lp_hz') is not None:
+        ss['pipe_smooth_lp'] = float(cfg['smoothing_lp_hz'])
+    if cfg.get('smoothing_ma_ms') is not None:
+        ss['pipe_smooth_ma'] = float(cfg['smoothing_ma_ms'])
+    ss['pipe_n_boot'] = int(cfg.get('n_bootstrap', 10000))
+    ss['pipe_threshold'] = float(cfg.get('guilty_threshold', 0.75))
+    ss['pipe_ar_jobs'] = int(cfg.get('ar_n_jobs', 1))
+
+
+def _grid_space_size(ranges):
+    """Return the number of combinations without materializing the grid."""
+    if not ranges:
+        return 0
+    # Adaptive k applies only to IQR / Z-score rejection; count accordingly.
+    if 's1_adaptive_k' in ranges and 's1_rejection' in ranges:
+        return len(_build_grid_space(ranges))
+    n = 1
+    for vals in ranges.values():
+        n *= len(vals)
+    return n
+
+
+def _build_grid_space(ranges):
+    """Cartesian product of *ranges* → ``list[dict]``.
+
+    When both ``s1_rejection`` and ``s1_adaptive_k`` are present, values of
+    *s1_adaptive_k* are crossed in only for ``iqr`` / ``zscore``. For
+    ``autoreject`` (or other methods), *k* is omitted so ``base_cfg`` applies.
+    """
+    if not ranges:
+        return []
+    k_key = 's1_adaptive_k'
+    rej_key = 's1_rejection'
+    if k_key in ranges and rej_key in ranges:
+        k_vals = ranges[k_key]
+        sub_ranges = {k: v for k, v in ranges.items() if k != k_key}
+        keys = list(sub_ranges.keys())
+        values = [sub_ranges[k] for k in keys]
+        out = []
+        for combo in _iter_product(*values):
+            row = dict(zip(keys, combo))
+            rej = row.get(rej_key)
+            if rej in ('iqr', 'zscore'):
+                for kv in k_vals:
+                    out.append({**row, k_key: kv})
+            else:
+                out.append(dict(row))
+        return out
+    keys = list(ranges.keys())
+    values = [ranges[k] for k in keys]
+    return [dict(zip(keys, combo)) for combo in _iter_product(*values)]
+
+
+def _parse_custom_floats(text):
+    """Parse comma-separated floats from a text input string."""
+    out = []
+    for tok in text.replace(';', ',').split(','):
+        tok = tok.strip()
+        if tok:
+            try:
+                out.append(float(tok))
+            except ValueError:
+                pass
+    return sorted(set(out))
+
+
+def _parse_custom_ints(text):
+    """Parse comma-separated ints from a text input string."""
+    out = []
+    for tok in text.replace(';', ',').split(','):
+        tok = tok.strip()
+        if tok:
+            try:
+                out.append(int(tok))
+            except ValueError:
+                pass
+    return sorted(set(out))
+
+
+def _compute_roc_auc(labels, scores):
+    """Compute ROC-AUC from ground-truth *labels* (1=guilty) and *scores*.
+
+    Sweeps ``_ROC_THRESHOLDS``, deduplicates by keeping the maximum
+    TPR at each unique FPR level, then applies the trapezoidal rule.
+
+    :returns: ``(auc, tpr_list, fpr_list, thresholds)``
+    """
+    labels = np.asarray(labels)
+    scores = np.asarray(scores)
+    n_pos = (labels == 1).sum()
+    n_neg = (labels == 0).sum()
+    if n_pos == 0 or n_neg == 0:
+        return 0.5, [], [], _ROC_THRESHOLDS
+
+    tpr_raw, fpr_raw = [], []
+    for thr in _ROC_THRESHOLDS:
+        pred = (scores >= thr).astype(int)
+        tp = ((pred == 1) & (labels == 1)).sum()
+        fp = ((pred == 1) & (labels == 0)).sum()
+        tpr_raw.append(tp / n_pos)
+        fpr_raw.append(fp / n_neg)
+
+    fpr_arr = np.array(fpr_raw)
+    tpr_arr = np.array(tpr_raw)
+
+    unique_fprs = np.unique(fpr_arr)
+    unique_tprs = np.array([tpr_arr[fpr_arr == f].max() for f in unique_fprs])
+
+    order = np.argsort(unique_fprs)
+    unique_fprs = unique_fprs[order]
+    unique_tprs = unique_tprs[order]
+
+    auc = float(np.trapz(unique_tprs, unique_fprs))
+    return auc, unique_tprs.tolist(), unique_fprs.tolist(), _ROC_THRESHOLDS
+
+
+def _fbeta_score(labels, preds, beta=1.0):
+    """Compute F-beta score from arrays of ground-truth *labels* and *preds*.
+
+    :returns: ``float`` in [0, 1].
+    """
+    tp = int(((preds == 1) & (labels == 1)).sum())
+    fp = int(((preds == 1) & (labels == 0)).sum())
+    fn = int(((preds == 0) & (labels == 1)).sum())
+    b2 = beta * beta
+    denom = (1 + b2) * tp + b2 * fn + fp
+    if denom == 0:
+        return 0.0
+    return float((1 + b2) * tp / denom)
+
+
+def _score_combo(batch_results, use_loocv=False, fbeta_weight=1.0):
+    """Score a single grid-search combo.
+
+    Computes ROC-AUC by sweeping thresholds over ``max_proportion``.
+    Threshold selection uses the **F-beta** metric (with *fbeta_weight*)
+    instead of raw accuracy.
+
+    When *use_loocv* is ``True``, accuracy / sensitivity / specificity /
+    ``fbeta`` use leave-one-out predictions (threshold chosen on N−1
+    subjects via F-beta, tested on the held-out one).
+    ``fbeta_resubstitution`` is F-beta at ``best_threshold`` on all subjects.
+
+    :returns: dict with metric keys (includes ``fbeta_resubstitution`` and,
+        when *use_loocv* with >2 subjects, ``loocv_per_subject`` fold table).
+    """
+    valid = [r for r in batch_results if 'error' not in r]
+    if not valid:
+        return {
+            'auc': 0.0, 'best_threshold': 0.5,
+            'accuracy': 0.0, 'sensitivity': 0.0, 'specificity': 0.0,
+            'fbeta': 0.0,
+            'tp': 0, 'fn': 0, 'fp': 0, 'tn': 0,
+            'roc_tprs': [], 'roc_fprs': [],
+            'best_fpr': 0.0, 'best_tpr': 0.0,
+            'fbeta_resubstitution': 0.0,
+            'loocv_per_subject': None,
+        }
+
+    labels = np.array([
+        1 if r['ground_truth'] == 'guilty' else 0 for r in valid
+    ])
+    scores = np.array([
+        r['bad_results']['max_proportion'] for r in valid
+    ])
+
+    auc, tprs, fprs, thresholds = _compute_roc_auc(labels, scores)
+
+    loo_preds = None
+    loocv_per_subject = None
+    if use_loocv and len(valid) > 2:
+        loo_preds = np.zeros(len(valid), dtype=int)
+        loocv_per_subject = []
+        for i in range(len(valid)):
+            train_mask = np.ones(len(valid), dtype=bool)
+            train_mask[i] = False
+            train_labels = labels[train_mask]
+            train_scores = scores[train_mask]
+            best_thr_i, best_fb_i = 0.5, -1.0
+            for thr in _ROC_THRESHOLDS:
+                pred = (train_scores >= thr).astype(int)
+                fb = _fbeta_score(train_labels, pred, beta=fbeta_weight)
+                if fb > best_fb_i:
+                    best_fb_i, best_thr_i = fb, thr
+            loo_preds[i] = int(scores[i] >= best_thr_i)
+            vr = valid[i]
+            pred_guilty = bool(loo_preds[i] == 1)
+            gt_guilty = vr['ground_truth'] == 'guilty'
+            loocv_per_subject.append({
+                'filename': vr['filename'],
+                'ground_truth': str(vr['ground_truth']).upper(),
+                'max_proportion': float(scores[i]),
+                'train_selected_threshold': float(best_thr_i),
+                'predicted': 'GUILTY' if pred_guilty else 'INNOCENT',
+                'score_minus_threshold': float(scores[i] - best_thr_i),
+                'correct': pred_guilty == gt_guilty,
+            })
+        tp = int(((loo_preds == 1) & (labels == 1)).sum())
+        fn = int(((loo_preds == 0) & (labels == 1)).sum())
+        fp = int(((loo_preds == 1) & (labels == 0)).sum())
+        tn = int(((loo_preds == 0) & (labels == 0)).sum())
+        best_thr_final = 0.5
+        best_fb_final = -1.0
+        for thr in _ROC_THRESHOLDS:
+            pred = (scores >= thr).astype(int)
+            fb = _fbeta_score(labels, pred, beta=fbeta_weight)
+            if fb > best_fb_final:
+                best_fb_final, best_thr_final = fb, thr
+    else:
+        best_thr_final, best_fb_final = 0.5, -1.0
+        for thr in thresholds:
+            pred = (scores >= thr).astype(int)
+            fb = _fbeta_score(labels, pred, beta=fbeta_weight)
+            if fb > best_fb_final:
+                best_fb_final, best_thr_final = fb, thr
+        pred_best = (scores >= best_thr_final).astype(int)
+        tp = int(((pred_best == 1) & (labels == 1)).sum())
+        fn = int(((pred_best == 0) & (labels == 1)).sum())
+        fp = int(((pred_best == 1) & (labels == 0)).sum())
+        tn = int(((pred_best == 0) & (labels == 0)).sum())
+
+    n = tp + fn + fp + tn
+
+    pred_at_best = (scores >= best_thr_final).astype(int)
+    _n_neg = int((labels == 0).sum())
+    _n_pos = int((labels == 1).sum())
+    best_fpr = float(
+        ((pred_at_best == 1) & (labels == 0)).sum() / max(_n_neg, 1)
+    )
+    best_tpr = float(
+        ((pred_at_best == 1) & (labels == 1)).sum() / max(_n_pos, 1)
+    )
+    fbeta_resub = _fbeta_score(labels, pred_at_best, beta=fbeta_weight)
+    if loo_preds is not None:
+        fbeta_val = _fbeta_score(labels, loo_preds, beta=fbeta_weight)
+    else:
+        fbeta_val = fbeta_resub
+
+    return {
+        'auc': auc,
+        'best_threshold': float(best_thr_final),
+        'accuracy': (tp + tn) / n if n else 0.0,
+        'sensitivity': tp / (tp + fn) if (tp + fn) else 0.0,
+        'specificity': tn / (tn + fp) if (tn + fp) else 0.0,
+        'fbeta': fbeta_val,
+        'fbeta_resubstitution': fbeta_resub,
+        'tp': tp, 'fn': fn, 'fp': fp, 'tn': tn,
+        'roc_tprs': tprs, 'roc_fprs': fprs,
+        'best_fpr': best_fpr, 'best_tpr': best_tpr,
+        'loocv_per_subject': loocv_per_subject,
+    }
+
+
+_PEAK_AMPLITUDE_METHODS = frozenset({
+    'Peak-to-peak (Rosenfeld)',
+    'Peak-to-Peak (Peak-Valley)',
+    'Baseline-to-peak',
+})
+
+
+def _enforce_smoothing_for_peak_methods(cfg):
+    """Force smoothing when a peak-based amplitude method is selected.
+
+    Peak-based extraction is highly sensitive to single-sample noise
+    spikes.  Running without smoothing would inflate variance and make
+    the bootstrap test unreliable.
+    """
+    amp = cfg.get('amplitude_method', '')
+    smooth = cfg.get('smoothing_method', 'Low-pass (Butterworth)')
+    if amp in _PEAK_AMPLITUDE_METHODS and smooth == 'None':
+        cfg = {**cfg, 'smoothing_method': 'Low-pass (Butterworth)'}
+    return cfg
+
+
+_HEAVY_PIPELINE_KEYS = frozenset({
+    'raw', 'raw_filtered', 'epochs', 'probe_erp', 'irrelevant_erp',
+})
+
+
+def _strip_heavy_objects(result):
+    """Remove large MNE objects from a pipeline result dict.
+
+    Keeps only lightweight data needed for scoring and display
+    (``bad_results``, ``individual_p300_window``, metrics, log, etc.).
+    """
+    return {k: v for k, v in result.items() if k not in _HEAVY_PIPELINE_KEYS}
+
+
+def _run_single_file(raw, events, event_id, fname, ground_truth, cfg):
+    """Run pipeline for one file. Thread-safe wrapper for parallel execution."""
+    try:
+        r = run_pipeline(raw, events, event_id, cfg)
+        r['filename'] = fname
+        r['ground_truth'] = ground_truth
+        return r
+    except Exception as exc:
+        return {
+            'filename': fname,
+            'ground_truth': ground_truth,
+            'error': str(exc),
+        }
+
+
+def _run_combo(innocent_data, guilty_data, cfg, max_workers=1):
+    """Run pipeline for all files under a single config.
+
+    :param max_workers:
+        Number of parallel threads. MNE releases the GIL for most
+        NumPy/SciPy work, so threads give real speedup here.
+    :returns: ``list[dict]`` — per-file pipeline results.
+    """
+    all_jobs = [
+        (raw, ev, eid, fn, 'innocent', cfg)
+        for raw, ev, eid, fn in innocent_data
+    ] + [
+        (raw, ev, eid, fn, 'guilty', cfg)
+        for raw, ev, eid, fn in guilty_data
+    ]
+
+    if max_workers <= 1 or len(all_jobs) <= 1:
+        return [_run_single_file(*args) for args in all_jobs]
+
+    batch = [None] * len(all_jobs)
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        future_to_idx = {
+            pool.submit(_run_single_file, *args): i
+            for i, args in enumerate(all_jobs)
+        }
+        for future in as_completed(future_to_idx):
+            batch[future_to_idx[future]] = future.result()
+    return batch
+
+
+def _run_grid_search(
+    innocent_data,
+    guilty_data,
+    base_cfg,
+    grid_space,
+    progress_bar,
+    status_text,
+    use_loocv=False,
+    fbeta_weight=1.0,
+    max_workers=1,
+):
+    """Execute a full grid search with ROC-AUC scoring and ETA.
+
+    Partial results are saved to ``st.session_state`` after every
+    iteration so that they survive page refreshes.
+    """
+    results = st.session_state.get('_gs_partial', [])
+    start_idx = len(results)
+    n_combos = len(grid_space)
+    cum_time = sum(r['elapsed_s'] for r in results)
+
+    for idx in range(start_idx, n_combos):
+        if st.session_state.get('_gs_stop'):
+            status_text.text(
+                f"Stopped after {idx}/{n_combos} combos."
+            )
+            break
+
+        overrides = grid_space[idx]
+        t0 = _time.time()
+        cfg = _enforce_smoothing_for_peak_methods(
+            {**base_cfg, **overrides},
+        )
+
+        eta_str = ""
+        if idx > 0 and cum_time > 0:
+            avg = cum_time / idx
+            remaining = avg * (n_combos - idx)
+            eta_str = f" | ETA {remaining:.0f}s"
+
+        status_text.text(
+            f"Combo {idx + 1}/{n_combos}{eta_str}: "
+            + ", ".join(f"{k}={v}" for k, v in overrides.items())
+        )
+        progress_bar.progress(
+            int(idx / n_combos * 100),
+            text=f"Grid search {idx + 1}/{n_combos}{eta_str}",
+        )
+
+        batch = _run_combo(
+            innocent_data, guilty_data, cfg,
+            max_workers=max_workers,
+        )
+        metrics = _score_combo(
+            batch, use_loocv=use_loocv, fbeta_weight=fbeta_weight,
+        )
+        elapsed = _time.time() - t0
+        cum_time += elapsed
+
+        lightweight_batch = [_strip_heavy_objects(r) for r in batch]
+        del batch
+
+        results.append({
+            'overrides': overrides,
+            'cfg': cfg,
+            **metrics,
+            'n_errors': sum(
+                1 for r in lightweight_batch if 'error' in r
+            ),
+            'elapsed_s': elapsed,
+            'batch_results': lightweight_batch,
+        })
+        st.session_state['_gs_partial'] = results
+
+    done = len(results) >= n_combos
+    label = "Grid search complete!" if done else "Grid search stopped."
+    progress_bar.progress(100 if done else int(len(results) / n_combos * 100), text=label)
+    st.session_state.pop('_gs_partial', None)
+    return results
+
+
+def _run_optuna_search(
+    innocent_data,
+    guilty_data,
+    base_cfg,
+    param_defs,
+    n_trials,
+    progress_bar,
+    status_text,
+    use_loocv=False,
+    fbeta_weight=1.0,
+    study=None,
+    max_workers=1,
+    adaptive_k_float_spec=None,
+):
+    """Run Optuna TPE optimisation.
+
+    Mixed search space: categorical lists from the Grid Search UI,
+    stepped integers/floats for selected LP/P300/BAD cutoffs, and optional
+    conditional ``s1_adaptive_k`` (only when rejection is IQR/Z-score).
+
+    :param param_defs:
+        ``list[(key, kind, lo, hi, step_or_choices)]``.
+        *kind* is ``'cat'`` (*step_or_choices* = choice list), ``'int'``, or
+        ``'float'`` (*step_or_choices* = step).
+    :param adaptive_k_float_spec:
+        ``(low, high, step)`` for ``trial.suggest_float`` on
+        ``s1_adaptive_k`` when ``s1_rejection`` is ``iqr`` or ``zscore``;
+        ``None`` to omit.
+    :param study:
+        Optional existing ``optuna.Study`` to resume.
+    :returns: ``list[dict]`` same shape as grid search results.
+    """
+    results = st.session_state.get('_gs_partial', [])
+    start_trial = len(results)
+    cum_time = sum(r['elapsed_s'] for r in results)
+    stopped = False
+    trial_counter = start_trial
+
+    def objective(trial):
+        nonlocal cum_time, stopped, trial_counter
+        if st.session_state.get('_gs_stop'):
+            stopped = True
+            raise optuna.TrialPruned()
+
+        t0 = _time.time()
+        overrides = {}
+        for key, kind, lo, hi, step_or_choices in param_defs:
+            if kind == 'int':
+                overrides[key] = trial.suggest_int(
+                    key, lo, hi, step=step_or_choices,
+                )
+            elif kind == 'float':
+                overrides[key] = trial.suggest_float(
+                    key, lo, hi, step=step_or_choices,
+                )
+            else:
+                overrides[key] = trial.suggest_categorical(
+                    key, step_or_choices,
+                )
+
+        rej = overrides.get(
+            's1_rejection', base_cfg.get('s1_rejection'),
+        )
+        if adaptive_k_float_spec is not None and rej in ('iqr', 'zscore'):
+            k_lo, k_hi, k_step = adaptive_k_float_spec
+            overrides['s1_adaptive_k'] = trial.suggest_float(
+                's1_adaptive_k', k_lo, k_hi, step=k_step,
+            )
+
+        cfg = _enforce_smoothing_for_peak_methods(
+            {**base_cfg, **overrides},
+        )
+        idx = trial_counter
+
+        eta_str = ""
+        if idx > 0 and cum_time > 0:
+            avg = cum_time / idx
+            eta_remaining = avg * (n_trials - idx)
+            eta_str = f" | ETA {eta_remaining:.0f}s"
+
+        status_text.text(
+            f"Trial {idx + 1}/{n_trials}{eta_str}: "
+            + ", ".join(f"{k}={v}" for k, v in overrides.items())
+        )
+        progress_bar.progress(
+            min(int(idx / n_trials * 100), 100),
+            text=f"Optuna {idx + 1}/{n_trials}{eta_str}",
+        )
+
+        batch = _run_combo(
+            innocent_data, guilty_data, cfg,
+            max_workers=max_workers,
+        )
+        metrics = _score_combo(
+            batch, use_loocv=use_loocv, fbeta_weight=fbeta_weight,
+        )
+        elapsed = _time.time() - t0
+        cum_time += elapsed
+
+        lightweight_batch = [_strip_heavy_objects(r) for r in batch]
+        del batch
+
+        results.append({
+            'overrides': {
+                k: (round(v, 4) if isinstance(v, float) else v)
+                for k, v in overrides.items()
+            },
+            'cfg': cfg,
+            **metrics,
+            'n_errors': sum(
+                1 for r in lightweight_batch if 'error' in r
+            ),
+            'elapsed_s': elapsed,
+            'batch_results': lightweight_batch,
+        })
+        st.session_state['_gs_partial'] = results
+        trial_counter += 1
+        return metrics['auc']
+
+    if study is None:
+        study = optuna.create_study(direction='maximize')
+
+    def _stop_callback(study_obj, trial):
+        if st.session_state.get('_gs_stop'):
+            study_obj.stop()
+
+    remaining = max(0, n_trials - start_trial)
+    if remaining > 0:
+        study.optimize(
+            objective,
+            n_trials=remaining,
+            show_progress_bar=False,
+            callbacks=[_stop_callback],
+        )
+
+    st.session_state['_optuna_study'] = study
+
+    done = len(results) >= n_trials
+    label = "Optuna search complete!" if done else "Optuna search stopped."
+    progress_bar.progress(100 if done else int(len(results) / n_trials * 100), text=label)
+    st.session_state.pop('_gs_partial', None)
+    return results
+
+
+def _display_grid_search_results(gs_results, use_loocv=False):
+    """Render search results table, ROC curve, best config, and details."""
+    st.markdown("---")
+    n_completed = len(gs_results)
+    validation_tag = " (LOOCV)" if use_loocv else " (resubstitution)"
+    st.subheader(f"Search Results \u2014 {n_completed} combos{validation_tag}")
+
+    rows = []
+    for i, r in enumerate(gs_results):
+        row = {'#': i + 1}
+        row.update(r['overrides'])
+        row['AUC'] = f"{r['auc']:.4f}"
+        row['F-beta'] = f"{r.get('fbeta', 0.0):.4f}"
+        row['Best Thr.'] = f"{r['best_threshold']:.2f}"
+        row['Accuracy'] = f"{r['accuracy']:.1%}"
+        row['Sensitivity'] = f"{r['sensitivity']:.1%}"
+        row['Specificity'] = f"{r['specificity']:.1%}"
+        row['TP'] = r['tp']
+        row['FN'] = r['fn']
+        row['FP'] = r['fp']
+        row['TN'] = r['tn']
+        row['Errors'] = r['n_errors']
+        row['Time (s)'] = f"{r['elapsed_s']:.1f}"
+        rows.append(row)
+
+    df = pd.DataFrame(rows)
+    st.dataframe(
+        df.style.highlight_max(subset=['AUC'], color='#c6efce'),
+        width='stretch',
+    )
+
+    best = max(gs_results, key=lambda r: r['auc'])
+    best_idx = gs_results.index(best) + 1
+
+    st.subheader("Best configuration (by ROC-AUC)")
+    b1, b2, b3, b4, b5, b6 = st.columns(6)
+    b1.metric("AUC", f"{best['auc']:.4f}")
+    b2.metric("F-beta", f"{best.get('fbeta', 0.0):.4f}")
+    b3.metric("Best Thr.", f"{best['best_threshold']:.2f}")
+    b4.metric("Accuracy", f"{best['accuracy']:.1%}")
+    b5.metric("Sensitivity", f"{best['sensitivity']:.1%}")
+    b6.metric("Specificity", f"{best['specificity']:.1%}")
+
+    if best.get('roc_fprs') and best.get('roc_tprs'):
+        with st.expander("ROC Curve (best config)", expanded=True):
+            fig_roc, ax_roc = plt.subplots(figsize=(6, 5))
+            ax_roc.plot(
+                best['roc_fprs'], best['roc_tprs'],
+                color='#1f77b4', linewidth=2,
+                label=f"AUC = {best['auc']:.4f}",
+            )
+            ax_roc.plot([0, 1], [0, 1], 'k--', linewidth=1, alpha=0.5)
+
+            b_fpr = best.get('best_fpr')
+            b_tpr = best.get('best_tpr')
+            b_thr = best.get('best_threshold')
+            if b_fpr is not None and b_tpr is not None:
+                ax_roc.plot(
+                    b_fpr, b_tpr, 'ro', markersize=8, zorder=5,
+                    label=f"Thr = {b_thr:.2f}",
+                )
+                ax_roc.annotate(
+                    f"thr={b_thr:.2f}\nTPR={b_tpr:.2f}, FPR={b_fpr:.2f}",
+                    xy=(b_fpr, b_tpr),
+                    xytext=(b_fpr + 0.12, b_tpr - 0.15),
+                    fontsize=9,
+                    arrowprops=dict(arrowstyle='->', color='red', lw=1.2),
+                    bbox=dict(
+                        boxstyle='round,pad=0.3', fc='#fff3cd',
+                        ec='red', alpha=0.9,
+                    ),
+                )
+
+            ax_roc.set_xlabel('False Positive Rate')
+            ax_roc.set_ylabel('True Positive Rate')
+            ax_roc.set_title('ROC Curve')
+            ax_roc.legend(loc='lower right')
+            ax_roc.grid(True, alpha=0.3)
+            ax_roc.set_xlim(-0.02, 1.02)
+            ax_roc.set_ylim(-0.02, 1.02)
+            plt.tight_layout()
+            st.pyplot(fig_roc)
+            plt.close()
+
+    st.markdown("**Optimal parameter overrides:**")
+    st.json(best['overrides'])
+
+    with st.expander("Full optimal config dict"):
+        st.json({
+            k: v for k, v in best['cfg'].items()
+            if not callable(v)
+        })
+
+    with st.expander("Per-file results for best config"):
+        _display_grouped_batch_results(best['batch_results'])
+
+    csv_buf = io.StringIO()
+    csv_buf.write(
+        f"# Search Results \u2014 {pd.Timestamp.now()}\n"
+    )
+    df.to_csv(csv_buf, index=False)
+    csv_buf.write(f"\n# Best combo: #{best_idx}\n")
+    csv_buf.write(f"# AUC: {best['auc']:.4f}\n")
+    csv_buf.write(
+        f"# Best threshold: {best['best_threshold']:.2f}\n"
+    )
+    for k, v in best['overrides'].items():
+        csv_buf.write(f"# {k} = {v}\n")
+
+    dl_c1, dl_c2, dl_c3 = st.columns(3)
+    with dl_c1:
+        st.download_button(
+            "Download search results (CSV)",
+            data=csv_buf.getvalue(),
+            file_name="grid_search_results.csv",
+            mime="text/csv",
+            key="gs_csv_dl",
+        )
+    with dl_c2:
+        _best_cfg_json = _cfg_to_json(best['cfg'])
+        st.download_button(
+            "Download best config (JSON)",
+            data=_best_cfg_json,
+            file_name="best_pipeline_config.json",
+            mime="application/json",
+            key="gs_json_dl",
+        )
+    with dl_c3:
+        if st.button(
+            "Apply best config to Quick Pipeline",
+            key="gs_apply_to_qp",
+        ):
+            _apply_config_to_widgets(best['cfg'])
+            st.success(
+                "Config applied! Switch to **Quick Pipeline** to use it."
+            )
+
+
 # ============================================================================
 # Main Application
 # ============================================================================
@@ -2018,7 +3584,7 @@ def main():
         "Select Page",
         ["📂 Load Data", "📊 Signal Quality", "🔧 Preprocessing",
          "🔍 Block Viewer", "📈 Epoching", "🎯 ERP Analysis",
-         "⚡ Quick Pipeline", "📉 Export Results"]
+         "⚡ Quick Pipeline", "🔎 Grid Search", "📉 Export Results"]
     )
     
     # ========================================================================
@@ -2112,7 +3678,7 @@ def main():
                             {'Event Type': k, 'Count': v}
                             for k, v in sorted(event_counts.items())
                         ])
-                        st.dataframe(df_events, use_container_width=True)
+                        st.dataframe(df_events, width='stretch')
                     
                     # First few annotations
                     with st.expander("View First 10 Annotations"):
@@ -2123,7 +3689,7 @@ def main():
                                 'Description': raw.annotations.description[i]
                             })
                         st.dataframe(pd.DataFrame(annotations_data), 
-                                   use_container_width=True)
+                                   width='stretch')
                 
                 else:
                     st.warning("⚠️ No event markers found in file")
@@ -2163,7 +3729,7 @@ def main():
         
         # Display results
         st.subheader("Quality Metrics")
-        st.dataframe(quality_df, use_container_width=True)
+        st.dataframe(quality_df, width='stretch')
         
         # Interpretation guide
         with st.expander("📖 Interpretation Guide"):
@@ -2231,6 +3797,7 @@ def main():
         preset = st.radio(
             "Filter preset",
             options=["Custom", "Aggressive (data rescue)"],
+            index=1,
             horizontal=True,
             help=(
                 "**Custom** — full manual control.  \n"
@@ -2252,7 +3819,7 @@ def main():
                 notch_freqs = st.multiselect(
                     "Frequencies (Hz)",
                     options=[50, 60],
-                    default=[50, 60],
+                    default=[50],
                     help="Remove powerline noise",
                 )
             else:
@@ -2275,7 +3842,7 @@ def main():
                         lowcut = st.number_input(
                             "High-pass (Hz)",
                             min_value=0.1, max_value=50.0,
-                            value=0.5, step=0.1,
+                            value=0.7, step=0.1,
                             key="preproc_agg_hp",
                         )
                     with col_agg2:
@@ -2324,7 +3891,8 @@ def main():
                     help=(
                         "**FIR** (default): linear-phase, no phase distortion.  \n"
                         "**IIR** (Butterworth): steeper rolloff, better for "
-                        "aggressive drift removal but introduces minor phase shift."
+                        "aggressive drift removal. Uses zero-phase (forward-"
+                        "backward) filtering to avoid P300 latency shifts."
                     ),
                 )
                 if filter_method == "iir":
@@ -2636,7 +4204,7 @@ def main():
             if block_events:
                 df_ev = pd.DataFrame(block_events)
                 df_ev['time'] = df_ev['time'].map(lambda t: f"{t:.3f}")
-                st.dataframe(df_ev, use_container_width=True)
+                st.dataframe(df_ev, width='stretch')
             else:
                 st.info("No events in this block.")
 
@@ -2718,7 +4286,7 @@ def main():
             detrend_mode = st.selectbox(
                 "Detrend",
                 options=["None", "DC offset (0)", "Linear (1)"],
-                index=2,
+                index=1,
                 help=(
                     "**None**: no detrending.  \n"
                     "**DC offset**: remove mean from each epoch.  \n"
@@ -2747,7 +4315,7 @@ def main():
             rejection_method = st.selectbox(
                 "Rejection method",
                 options=_rejection_options,
-                index=1,
+                index=len(_rejection_options) - 1,
                 help=(
                     "**None**: keep all epochs.  \n"
                     "**Static**: reject if any channel peak-to-peak > threshold.  \n"
@@ -2822,6 +4390,31 @@ def main():
                 adaptive_method = None
                 adaptive_k = None
 
+        # S2-based trial rejection
+        st.subheader("S2-Based Trial Rejection")
+        st.caption(
+            "Drop S1 epochs whose paired S2 response was incorrect "
+            "or exceeded the reaction-time limit. Applied before "
+            "artifact rejection."
+        )
+        s2r_col1, s2r_col2 = st.columns(2)
+        with s2r_col1:
+            s2_trial_rej_enabled = st.checkbox(
+                "Enable S2 trial rejection", value=True,
+                key="epoch_s2_trial_rej",
+            )
+        with s2r_col2:
+            s2_max_rt_enabled = st.checkbox(
+                "Apply max S2 RT limit", value=True,
+                key="epoch_s2_max_rt_en",
+                disabled=not s2_trial_rej_enabled,
+            )
+            s2_max_rt_val = st.number_input(
+                "Max S2 RT (s)", 0.1, 10.0, 1.0, 0.1,
+                key="epoch_s2_max_rt",
+                disabled=not (s2_trial_rej_enabled and s2_max_rt_enabled),
+            )
+
         # Create epochs
         if st.button("Create Epochs", type="primary"):
             try:
@@ -2834,6 +4427,22 @@ def main():
                         reject_threshold_uv=reject_threshold,
                         detrend=detrend,
                     )
+                    n_before_s2_rej = len(epochs)
+                    n_s2_rej_dropped = 0
+                    s2_rej_log = []
+                    if s2_trial_rej_enabled:
+                        _s2_max = (
+                            s2_max_rt_val
+                            if s2_max_rt_enabled else None
+                        )
+                        epochs, n_s2_rej_dropped, s2_rej_log = (
+                            reject_s1_by_s2_performance(
+                                epochs,
+                                st.session_state.raw,
+                                max_rt=_s2_max,
+                            )
+                        )
+
                     epochs_ch_names = list(epochs.ch_names)
                     ptp_vals = None
                     n_adaptive_dropped = 0
@@ -2859,6 +4468,15 @@ def main():
                                 )
                             )
                             n_autoreject_dropped = ar_info['n_dropped']
+
+                    epochs, n_bl_dropped, _ = reject_noisy_baseline(
+                        epochs, k=adaptive_k,
+                    )
+                    if n_bl_dropped > 0:
+                        st.info(
+                            f"Baseline QC: dropped {n_bl_dropped} "
+                            f"epoch(s) with noisy baseline window."
+                        )
 
                     st.session_state.epochs = epochs
 
@@ -2976,6 +4594,80 @@ def main():
                                 f"{n_autoreject_dropped} epochs"
                             )
 
+                if s2_trial_rej_enabled:
+                    with st.expander(
+                        "📊 S2 trial rejection details", expanded=True,
+                    ):
+                        sr1, sr2, sr3 = st.columns(3)
+                        with sr1:
+                            st.metric(
+                                "Before S2 rejection",
+                                n_before_s2_rej,
+                            )
+                        with sr2:
+                            st.metric(
+                                "Dropped (S2)",
+                                n_s2_rej_dropped,
+                            )
+                        with sr3:
+                            s2_rej_pct = (
+                                n_s2_rej_dropped / n_before_s2_rej * 100
+                                if n_before_s2_rej > 0 else 0
+                            )
+                            st.metric(
+                                "S2 drop rate",
+                                f"{s2_rej_pct:.1f}%",
+                            )
+
+                        if s2_rej_log:
+                            reasons = {}
+                            for _, tnum, reason in s2_rej_log:
+                                reasons[reason] = (
+                                    reasons.get(reason, 0) + 1
+                                )
+                            reason_df = pd.DataFrame([
+                                {'Reason': r, 'Count': c}
+                                for r, c in reasons.items()
+                            ])
+                            st.dataframe(
+                                reason_df, width='stretch',
+                            )
+
+                        st.markdown("**S2 ERP: Correct vs Incorrect**")
+                        with st.spinner(
+                            "Computing S2 comparison ERP…"
+                        ):
+                            fig_s2cmp, s2_stats = (
+                                plot_s2_correct_vs_incorrect(
+                                    st.session_state.raw,
+                                    tmin=tmin,
+                                    tmax=tmax,
+                                    baseline=baseline,
+                                    detrend=detrend,
+                                )
+                            )
+                        sc1, sc2, sc3 = st.columns(3)
+                        sc1.metric(
+                            "S2 Correct",
+                            s2_stats['n_correct'],
+                        )
+                        sc2.metric(
+                            "S2 Incorrect",
+                            s2_stats['n_incorrect'],
+                        )
+                        sc3.metric(
+                            "S2 No response",
+                            s2_stats['n_no_response'],
+                        )
+                        if fig_s2cmp is not None:
+                            st.pyplot(fig_s2cmp)
+                            plt.close(fig_s2cmp)
+                        else:
+                            st.info(
+                                "No S2 onset events found — "
+                                "comparison plot unavailable."
+                            )
+
             except Exception as e:
                 st.error(f"❌ Error creating epochs: {str(e)}")
                 st.code(traceback.format_exc())
@@ -3013,7 +4705,7 @@ def main():
                 df_counts = pd.DataFrame(event_counts)
                 # Aggregate by base type
                 df_counts = df_counts.groupby('Event Type').sum().reset_index()
-                st.dataframe(df_counts, use_container_width=True)
+                st.dataframe(df_counts, width='stretch')
             
             # Visualize epochs
             st.subheader("Epoch Visualization")
@@ -3085,10 +4777,13 @@ def main():
 
         with conf_col1:
             available_channels = list(epochs.ch_names)
+            _default_analysis_chs = (
+                ['Pz'] if 'Pz' in available_channels else available_channels
+            )
             selected_channels = st.multiselect(
                 "Channels to include",
                 options=available_channels,
-                default=available_channels,
+                default=_default_analysis_chs,
                 help=(
                     "Subset of channels used for ERP waveforms and CTP-BAD. "
                     "Useful when only some electrodes have clean signal."
@@ -3102,10 +4797,14 @@ def main():
             stim_ids = extract_stim_ids(st.session_state.event_id or {})
             if stim_ids:
                 target_options = ["probe (default)"] + stim_ids
+                _tgt_default_idx = (
+                    target_options.index('wolf')
+                    if 'wolf' in target_options else 0
+                )
                 target_choice = st.selectbox(
                     "Target stimulus",
                     options=target_options,
-                    index=0,
+                    index=_tgt_default_idx,
                     help=(
                         "Stimulus treated as 'target' in comparison.  \n"
                         "**probe (default)**: the designated probe object.  \n"
@@ -3141,7 +4840,7 @@ def main():
         with smooth_col1:
             erp_smooth_enabled = st.checkbox(
                 "Enable ERP low-pass smoothing",
-                value=False,
+                value=True,
                 key="erp_smooth_enabled",
                 help=(
                     "Apply a low-pass filter to the averaged ERPs before "
@@ -3155,7 +4854,7 @@ def main():
                 "Low-pass cutoff (Hz)",
                 min_value=1.0,
                 max_value=30.0,
-                value=6.0,
+                value=12.0,
                 step=0.5,
                 key="erp_lowpass_hz",
                 disabled=not erp_smooth_enabled,
@@ -3215,6 +4914,11 @@ def main():
                     "the P300 peak latency on **S2 target** responses, then "
                     "applying *peak ± margin* to the S1 analysis."
                 )
+                st.caption(
+                    "S2 epochs use the **same rejection as Quick Pipeline → "
+                    "S1** when those widgets exist in this session; otherwise "
+                    "the checkbox fallback below applies."
+                )
 
                 raw_for_s2 = (
                     st.session_state.raw_filtered
@@ -3226,7 +4930,7 @@ def main():
                 with ip_col1:
                     _ch_list = list(epochs.ch_names)
                     _default_chs = [
-                        ch for ch in ['Pz', 'Cz'] if ch in _ch_list
+                        ch for ch in ['Pz'] if ch in _ch_list
                     ] or _ch_list[:1]
                     ip_channels = st.multiselect(
                         "Peak channel(s)",
@@ -3242,13 +4946,34 @@ def main():
                         ip_channels = _ch_list[:1]
                     ip_use_ar = st.checkbox(
                         "Autoreject S2 epochs",
-                        value=False,
+                        value=_AUTOREJECT_AVAILABLE,
                         key="ip_use_autoreject",
                         disabled=not _AUTOREJECT_AVAILABLE,
                         help=(
-                            "Clean S2 target epochs with autoreject "
-                            "before averaging."
+                            "Fallback when Quick Pipeline was not opened: "
+                            "if checked, use autoreject as S1-style "
+                            "global rejection; otherwise skip that stage."
                         ),
+                    )
+                    ip_s2_trial_rej = st.checkbox(
+                        "S2 trial rejection",
+                        value=True,
+                        key="ip_s2_trial_rej",
+                        help=(
+                            "Drop S2 target epochs whose behavioural "
+                            "response was incorrect or missing."
+                        ),
+                    )
+                    ip_s2_max_rt_en = st.checkbox(
+                        "Apply max S2 RT limit",
+                        value=True,
+                        key="ip_s2_max_rt_en",
+                        disabled=not ip_s2_trial_rej,
+                    )
+                    ip_s2_max_rt_val = st.number_input(
+                        "Max S2 RT (s)", 0.1, 10.0, 1.0, 0.1,
+                        key="ip_s2_max_rt",
+                        disabled=not (ip_s2_trial_rej and ip_s2_max_rt_en),
                     )
                 with ip_col2:
                     ip_search_min = st.number_input(
@@ -3258,7 +4983,7 @@ def main():
                     )
                     ip_search_max = st.number_input(
                         "Peak search end (s)", min_value=0.2,
-                        max_value=1.5, value=0.70, step=0.05,
+                        max_value=1.5, value=0.60, step=0.05,
                         key="ip_search_max",
                     )
                 with ip_col3:
@@ -3273,6 +4998,49 @@ def main():
                              key="btn_compute_ip300"):
                     try:
                         with st.spinner("Creating S2 target epochs…"):
+                            _ip_s2_max = (
+                                ip_s2_max_rt_val
+                                if ip_s2_trial_rej and ip_s2_max_rt_en
+                                else None
+                            )
+                            _ip_rej_map = {
+                                "None": "none",
+                                "Static threshold": "static",
+                                "Adaptive: IQR": "iqr",
+                                "Adaptive: Z-score": "zscore",
+                                "Autoreject (ML-based)": "autoreject",
+                            }
+                            _pipe_lbl = st.session_state.get('pipe_s1_rej')
+                            if _pipe_lbl is not None:
+                                _ip_s1_rej = _ip_rej_map.get(
+                                    _pipe_lbl, 'autoreject',
+                                )
+                                _ip_s1_thresh = None
+                                _ip_s1_k = 3.0
+                                if _pipe_lbl == "Static threshold":
+                                    _ip_s1_thresh = float(
+                                        st.session_state.get(
+                                            'pipe_s1_thresh', 100.0,
+                                        ),
+                                    )
+                                elif _pipe_lbl in (
+                                    "Adaptive: IQR",
+                                    "Adaptive: Z-score",
+                                ):
+                                    _ip_s1_k = float(
+                                        st.session_state.get(
+                                            'pipe_s1_k', 3.0,
+                                        ),
+                                    )
+                            else:
+                                _ip_s1_rej = (
+                                    'autoreject' if ip_use_ar else 'none'
+                                )
+                                _ip_s1_thresh = None
+                                _ip_s1_k = 3.0
+                            _ip_ar_jobs = int(
+                                st.session_state.get('pipe_ar_jobs', 1),
+                            )
                             ip_result = compute_individual_p300_window(
                                 raw=raw_for_s2,
                                 events=st.session_state.events,
@@ -3282,16 +5050,31 @@ def main():
                                 peak_search_tmax=ip_search_max,
                                 window_margin=ip_margin,
                                 erp_lowpass_hz=erp_lowpass_hz_value,
-                                use_autoreject=ip_use_ar,
+                                s1_rejection=_ip_s1_rej,
+                                s1_threshold_uv=(
+                                    _ip_s1_thresh
+                                    if _ip_s1_rej == 'static' else None
+                                ),
+                                s1_adaptive_k=_ip_s1_k,
+                                ar_n_jobs=_ip_ar_jobs,
+                                s2_trial_rejection=ip_s2_trial_rej,
+                                s2_max_rt=_ip_s2_max,
                             )
                             st.session_state.individual_p300_window = ip_result
+                        _perf_msg = ""
+                        _n_perf = ip_result.get('n_s2_perf_dropped', 0)
+                        if _n_perf:
+                            _perf_msg = (
+                                f" | S2 perf. rejected: {_n_perf}"
+                            )
                         st.success(
                             f"Peak at **{ip_result['peak_time']*1000:.0f} ms** "
                             f"({ip_result['peak_amplitude']:.2f} µV) on "
                             f"**{ip_result['peak_channel']}** — "
                             f"Window: **{ip_result['window_start']*1000:.0f}–"
                             f"{ip_result['window_end']*1000:.0f} ms** "
-                            f"({ip_result['n_s2_epochs']} S2 target epochs)"
+                            f"({ip_result['n_s2_epochs']} S2 target epochs"
+                            f"{_perf_msg})"
                         )
                     except Exception as exc:
                         st.error(f"Individual window error: {exc}")
@@ -3381,7 +5164,7 @@ def main():
             if st.session_state.individual_p300_window is not None:
                 use_individual = st.checkbox(
                     "Use individual P300 window for analysis",
-                    value=False,
+                    value=True,
                     key="chk_use_individual_p300",
                 )
 
@@ -3426,7 +5209,7 @@ def main():
             p300_df = analyze_p300(probe_erp, irrelevant_erp, 
                                   tmin=p300_start, tmax=p300_end)
             
-            st.dataframe(p300_df, use_container_width=True)
+            st.dataframe(p300_df, width='stretch')
             
             # Interpretation
             with st.expander("📖 Interpretation Guide"):
@@ -3537,8 +5320,8 @@ def main():
                 bad_n_bootstrap = st.number_input(
                     "Bootstrap iterations",
                     min_value=100,
-                    max_value=10000,
-                    value=1000,
+                    max_value=100000,
+                    value=10000,
                     step=100,
                     help="More iterations = more stable results (slower)"
                 )
@@ -3548,9 +5331,9 @@ def main():
                     "Guilty threshold",
                     min_value=0.50,
                     max_value=0.99,
-                    value=0.90,
+                    value=0.75,
                     step=0.01,
-                    help="Classification threshold (default: 0.90 = 90%)"
+                    help="Classification threshold (default: 0.75 = 75%)"
                 )
 
             with col3:
@@ -3562,7 +5345,7 @@ def main():
                         "Peak-to-Peak (Peak-Valley)",
                         "Baseline-to-peak",
                     ],
-                    index=0,
+                    index=2,
                     help=(
                         "**Mean**: signed average in the P300 window — best "
                         "for noisy data (random spikes cancel out).  \n"
@@ -3646,7 +5429,7 @@ def main():
                         "LP cutoff (Hz)",
                         min_value=1.0,
                         max_value=30.0,
-                        value=6.0,
+                        value=12.0,
                         step=0.5,
                         key="bad_smooth_lp_hz",
                         disabled=(bad_smoothing_method != 'lowpass'),
@@ -3759,7 +5542,7 @@ def main():
                     if sm == 'lowpass':
                         extra += (
                             f" | **Smoothing:** LP "
-                            f"{bad_results.get('smoothing_lowpass_hz', 6.0)} Hz"
+                            f"{bad_results.get('smoothing_lowpass_hz', 12.0)} Hz"
                         )
                     elif sm == 'moving_average':
                         extra += (
@@ -3774,7 +5557,7 @@ def main():
                 
                 # Per-channel results
                 st.subheader("Per-Channel Results")
-                st.dataframe(bad_results['channel_results'], use_container_width=True)
+                st.dataframe(bad_results['channel_results'], width='stretch')
                 
                 # Visualization
                 st.subheader("Bootstrap Proportions by Channel")
@@ -3857,21 +5640,103 @@ def main():
             "protocol."
         )
 
+        # --- Import config from Grid Search ---
+        with st.expander(
+            "Import pipeline config from Grid Search / Optuna",
+            expanded=False,
+        ):
+            st.caption(
+                "Upload a `best_pipeline_config.json` exported from "
+                "the **Grid Search** tab, or click **Apply best config** "
+                "there directly."
+            )
+            _cfg_upload = st.file_uploader(
+                "Pipeline config JSON",
+                type=['json'],
+                key="pipe_cfg_upload",
+            )
+            if _cfg_upload is not None:
+                _fid = (_cfg_upload.name, _cfg_upload.size)
+                if st.session_state.get('_pipe_last_cfg_fid') != _fid:
+                    try:
+                        _imported = json.loads(
+                            _cfg_upload.read().decode(),
+                        )
+                        _apply_config_to_widgets(_imported)
+                        st.session_state['_pipe_last_cfg_fid'] = _fid
+                        st.session_state['_pipe_cfg_imported'] = True
+                        st.rerun()
+                    except (json.JSONDecodeError, KeyError) as exc:
+                        st.error(f"Invalid config file: {exc}")
+
+            if st.session_state.pop('_pipe_cfg_imported', False):
+                st.success(
+                    "Config loaded and applied to all widgets below."
+                )
+
         # --- Input mode ---
         input_mode = st.radio(
             "Input mode",
-            ["Single file (loaded)", "Batch (upload multiple .fif)"],
+            [
+                "Single file (loaded)",
+                "Batch (upload multiple .fif)",
+                "Batch with groups (innocent / guilty)",
+            ],
             horizontal=True,
             key="pipeline_input_mode",
         )
 
         batch_files = None
+        grouped_batch = None
+
         if input_mode == "Batch (upload multiple .fif)":
             batch_files = st.file_uploader(
                 "Upload .fif files",
                 type=['fif'],
                 accept_multiple_files=True,
                 key="pipeline_batch_upload",
+            )
+        elif input_mode == "Batch with groups (innocent / guilty)":
+            st.caption(
+                "Upload two separate sets of .fif files — one per "
+                "ground-truth group. Classification metrics will be "
+                "computed against these labels."
+            )
+            col_inn, col_gui = st.columns(2)
+            with col_inn:
+                innocent_files = st.file_uploader(
+                    "Innocent .fif files",
+                    type=['fif'],
+                    accept_multiple_files=True,
+                    key="pipeline_innocent_upload",
+                )
+            with col_gui:
+                guilty_files = st.file_uploader(
+                    "Guilty .fif files",
+                    type=['fif'],
+                    accept_multiple_files=True,
+                    key="pipeline_guilty_upload",
+                )
+            if innocent_files or guilty_files:
+                grouped_batch = {
+                    'innocent': innocent_files or [],
+                    'guilty': guilty_files or [],
+                }
+            st.markdown("**Grouped evaluation**")
+            pipe_grouped_loocv = st.checkbox(
+                "LOOCV metrics on max_proportion (leave-one-out cutoffs; "
+                "F-β on training folds — same scheme as Grid Search)",
+                value=False,
+                key="pipe_grouped_loocv_eval",
+            )
+            pipe_grouped_loocv_fbeta = st.number_input(
+                "F-β weight for LOOCV threshold selection",
+                min_value=0.1,
+                max_value=5.0,
+                value=1.0,
+                step=0.1,
+                key="pipe_grouped_loocv_fbeta",
+                disabled=not pipe_grouped_loocv,
             )
         else:
             if st.session_state.raw is None:
@@ -3884,7 +5749,7 @@ def main():
         _avail_chs = []
         if st.session_state.raw is not None:
             _avail_chs = list(st.session_state.raw.ch_names)
-        elif batch_files:
+        elif batch_files or grouped_batch:
             _avail_chs = ['Fz', 'Cz', 'Pz']
 
         # ===============================================================
@@ -3902,8 +5767,8 @@ def main():
                 key="pipe_filter_preset",
                 horizontal=True,
             )
-            pipe_notch = [50, 60]
-            pipe_hp = 0.5
+            pipe_notch = [50]
+            pipe_hp = 0.7
             pipe_lp = 30.0
             pipe_fmethod = 'iir'
             pipe_iir_order = 4
@@ -3916,11 +5781,11 @@ def main():
                 fa1, fa2 = st.columns(2)
                 with fa1:
                     pipe_notch = st.multiselect(
-                        "Notch (Hz)", [50, 60], default=[50, 60],
+                        "Notch (Hz)", [50, 60], default=[50],
                         key="pipe_notch_agg",
                     )
                     pipe_hp = st.number_input(
-                        "High-pass (Hz)", 0.1, 50.0, 0.5, 0.1,
+                        "High-pass (Hz)", 0.1, 50.0, 0.7, 0.1,
                         key="pipe_hp_agg",
                     )
                 with fa2:
@@ -3936,7 +5801,7 @@ def main():
                 fc1, fc2 = st.columns(2)
                 with fc1:
                     pipe_notch = st.multiselect(
-                        "Notch (Hz)", [50, 60], default=[50, 60],
+                        "Notch (Hz)", [50, 60], default=[50],
                         key="pipe_notch",
                     )
                     pipe_hp = st.number_input(
@@ -3975,7 +5840,7 @@ def main():
                 )
                 pipe_s2_detrend = st.selectbox(
                     "Detrend", ["None", "DC offset (0)", "Linear (1)"],
-                    index=2, key="pipe_s2_detrend",
+                    index=1, key="pipe_s2_detrend",
                 )
             with s2c3:
                 _s2_rej_opts = [
@@ -4009,13 +5874,13 @@ def main():
             iw1, iw2 = st.columns(2)
             with iw1:
                 _default_peak = (
-                    [c for c in ['Pz', 'Cz'] if c in _avail_chs]
+                    [c for c in ['Pz'] if c in _avail_chs]
                     or _avail_chs[:1]
                 )
                 pipe_peak_chs = st.multiselect(
                     "Peak channel(s)",
-                    options=_avail_chs or ['Pz', 'Cz'],
-                    default=_default_peak or ['Pz', 'Cz'],
+                    options=_avail_chs or ['Pz'],
+                    default=_default_peak or ['Pz'],
                     key="pipe_peak_chs",
                     help="Averaged for peak detection (higher SNR).",
                 )
@@ -4026,7 +5891,7 @@ def main():
                     key="pipe_search_min",
                 )
                 pipe_search_max = st.number_input(
-                    "Peak search end (s)", 0.2, 1.5, 0.70, 0.05,
+                    "Peak search end (s)", 0.2, 1.5, 0.60, 0.05,
                     key="pipe_search_max",
                 )
             with iw2:
@@ -4036,11 +5901,11 @@ def main():
                 )
                 pipe_s2_erp_lp = st.checkbox(
                     "ERP smoothing for peak detection",
-                    value=False,
+                    value=True,
                     key="pipe_s2_erp_lp_en",
                 )
                 pipe_s2_erp_lp_hz = st.number_input(
-                    "LP cutoff (Hz)", 1.0, 30.0, 6.0, 0.5,
+                    "LP cutoff (Hz)", 1.0, 30.0, 12.0, 0.5,
                     key="pipe_s2_erp_lp_hz",
                     disabled=not pipe_s2_erp_lp,
                 )
@@ -4079,7 +5944,7 @@ def main():
                 )
                 pipe_s1_detrend = st.selectbox(
                     "Detrend", ["None", "DC offset (0)", "Linear (1)"],
-                    index=2, key="pipe_s1_detrend",
+                    index=1, key="pipe_s1_detrend",
                 )
             with s1c3:
                 _s1_rej_opts = [
@@ -4106,6 +5971,30 @@ def main():
                         key="pipe_s1_k",
                     )
 
+            st.markdown("---")
+            st.markdown("**S2-based trial rejection**")
+            st.caption(
+                "Drop S1 epochs whose paired S2 response was incorrect "
+                "or exceeded the reaction-time limit."
+            )
+            s2r1, s2r2 = st.columns(2)
+            with s2r1:
+                pipe_s2_trial_rej = st.checkbox(
+                    "Enable S2 trial rejection", value=True,
+                    key="pipe_s2_trial_rej",
+                )
+            with s2r2:
+                pipe_s2_max_rt_en = st.checkbox(
+                    "Apply max S2 RT limit", value=True,
+                    key="pipe_s2_max_rt_en",
+                    disabled=not pipe_s2_trial_rej,
+                )
+                pipe_s2_max_rt = st.number_input(
+                    "Max S2 RT (s)", 0.1, 10.0, 1.0, 0.1,
+                    key="pipe_s2_max_rt",
+                    disabled=not (pipe_s2_trial_rej and pipe_s2_max_rt_en),
+                )
+
         # --- Step 5: CTP-BAD Bootstrap ---
         with st.expander(
             "**Step 5 — CTP-BAD Bootstrap**", expanded=False,
@@ -4121,8 +6010,8 @@ def main():
                 if pipe_bad_chs_override:
                     pipe_bad_chs = st.multiselect(
                         "CTP-BAD channels",
-                        options=_avail_chs or ['Pz', 'Cz'],
-                        default=_avail_chs or ['Pz', 'Cz'],
+                        options=_avail_chs or ['Pz'],
+                        default=_avail_chs or ['Pz'],
                         key="pipe_bad_chs",
                     )
                 else:
@@ -4136,7 +6025,7 @@ def main():
                         "Peak-to-Peak (Peak-Valley)",
                         "Baseline-to-peak",
                     ],
-                    index=1,
+                    index=2,
                     key="pipe_amp_method",
                 )
                 if pipe_amp_method == "Peak-to-peak (Rosenfeld)":
@@ -4155,7 +6044,7 @@ def main():
                     key="pipe_smooth_method",
                 )
                 pipe_smooth_lp = st.number_input(
-                    "LP cutoff (Hz)", 1.0, 30.0, 6.0, 0.5,
+                    "LP cutoff (Hz)", 1.0, 30.0, 12.0, 0.5,
                     key="pipe_smooth_lp",
                     disabled=pipe_smooth_method != "Low-pass (Butterworth)",
                 )
@@ -4171,11 +6060,11 @@ def main():
 
             with bc3:
                 pipe_n_boot = st.number_input(
-                    "Bootstrap iterations", 100, 10000, 1000, 100,
+                    "Bootstrap iterations", 100, 100000, 10000, 100,
                     key="pipe_n_boot",
                 )
                 pipe_threshold = st.slider(
-                    "Guilty threshold", 0.50, 0.99, 0.90, 0.01,
+                    "Guilty threshold", 0.50, 0.99, 0.75, 0.01,
                     key="pipe_threshold",
                 )
 
@@ -4256,6 +6145,9 @@ def main():
                 's1_rejection': _rej_map.get(pipe_s1_rej, 'autoreject'),
                 's1_threshold_uv': pipe_s1_thresh if pipe_s1_rej == "Static threshold" else None,
                 's1_adaptive_k': pipe_s1_k if pipe_s1_rej in ("Adaptive: IQR", "Adaptive: Z-score") else 3.0,
+                # S2 trial rejection
+                's2_trial_rejection': pipe_s2_trial_rej,
+                's2_max_rt': pipe_s2_max_rt if (pipe_s2_trial_rej and pipe_s2_max_rt_en) else None,
                 # CTP-BAD
                 'bad_channels': pipe_bad_chs,
                 'amplitude_method': pipe_amp_method,
@@ -4323,22 +6215,22 @@ def main():
         # ===============================================================
         # Batch execution
         # ===============================================================
-        else:
+        elif input_mode == "Batch (upload multiple .fif)":
             st.markdown("---")
             if not batch_files:
                 st.info("Upload one or more .fif files above.")
-            elif st.button("▶️ Run Batch Pipeline", type="primary",
+            elif st.button("\u25b6\ufe0f Run Batch Pipeline", type="primary",
                            key="pipe_run_batch"):
                 cfg = _build_cfg()
                 batch_results = []
                 n_files = len(batch_files)
-                progress = st.progress(0, text="Starting batch…")
+                progress = st.progress(0, text="Starting batch\u2026")
 
                 for i, fif_file in enumerate(batch_files):
                     fname = fif_file.name
                     progress.progress(
                         int((i / n_files) * 100),
-                        text=f"Processing {fname} ({i+1}/{n_files})…",
+                        text=f"Processing {fname} ({i+1}/{n_files})\u2026",
                     )
                     try:
                         temp_path = Path(f"_tmp_batch_{i}.fif")
@@ -4367,12 +6259,1118 @@ def main():
             if batch_res:
                 _display_batch_results(batch_res)
 
+        # ===============================================================
+        # Grouped batch execution (innocent / guilty)
+        # ===============================================================
+        elif input_mode == "Batch with groups (innocent / guilty)":
+            st.markdown("---")
+            if not grouped_batch:
+                st.info(
+                    "Upload .fif files for at least one group above."
+                )
+            elif st.button(
+                "\u25b6\ufe0f Run Grouped Batch Pipeline",
+                type="primary",
+                key="pipe_run_grouped",
+            ):
+                cfg = _build_cfg()
+                batch_results = []
+                all_files = [
+                    (f, 'innocent')
+                    for f in grouped_batch['innocent']
+                ] + [
+                    (f, 'guilty')
+                    for f in grouped_batch['guilty']
+                ]
+                n_files = len(all_files)
+                progress = st.progress(
+                    0, text="Starting grouped batch\u2026",
+                )
+
+                for i, (fif_file, ground_truth) in enumerate(all_files):
+                    fname = fif_file.name
+                    progress.progress(
+                        int((i / n_files) * 100),
+                        text=(
+                            f"[{ground_truth}] {fname} "
+                            f"({i+1}/{n_files})\u2026"
+                        ),
+                    )
+                    try:
+                        temp_path = Path(f"_tmp_gbatch_{i}.fif")
+                        temp_path.write_bytes(fif_file.read())
+                        raw, events, event_id = load_fif_file(
+                            str(temp_path),
+                        )
+                        temp_path.unlink(missing_ok=True)
+
+                        result = run_pipeline(
+                            raw, events, event_id, cfg,
+                        )
+                        result['filename'] = fname
+                        result['ground_truth'] = ground_truth
+                        batch_results.append(result)
+                    except Exception as exc:
+                        batch_results.append({
+                            'filename': fname,
+                            'ground_truth': ground_truth,
+                            'error': str(exc),
+                        })
+
+                progress.progress(100, text="Grouped batch complete!")
+                st.session_state['grouped_batch_results'] = batch_results
+
+            # --- Display grouped batch results ---
+            grouped_res = st.session_state.get(
+                'grouped_batch_results',
+            )
+            if grouped_res:
+                _display_grouped_batch_results(
+                    grouped_res,
+                    loocv_evaluation=st.session_state.get(
+                        'pipe_grouped_loocv_eval', False,
+                    ),
+                    fbeta_weight=float(
+                        st.session_state.get(
+                            'pipe_grouped_loocv_fbeta', 1.0,
+                        ),
+                    ),
+                )
+
     # ========================================================================
-    # Page 7: Export Results
+    # Page 8: Grid Search
+    # ========================================================================
+
+    elif page == "\U0001f50e Grid Search":
+        st.header("\U0001f50e BAD Parameter Grid Search")
+        st.markdown(
+            "Upload **innocent** and **guilty** .fif batches, define "
+            "parameter ranges, and run a **grid search** or "
+            "**Optuna TPE** optimisation to find the preprocessing / "
+            "BAD configuration that maximises **ROC-AUC**.  \n"
+            "*Tip: parameter widgets below are isolated — changing "
+            "them won't trigger a full page reload.*"
+        )
+
+        # --- File uploaders ---
+        st.subheader("Data")
+        gs_c1, gs_c2 = st.columns(2)
+        with gs_c1:
+            gs_innocent = st.file_uploader(
+                "Innocent .fif files",
+                type=['fif'],
+                accept_multiple_files=True,
+                key="gs_innocent_upload",
+            )
+        with gs_c2:
+            gs_guilty = st.file_uploader(
+                "Guilty .fif files",
+                type=['fif'],
+                accept_multiple_files=True,
+                key="gs_guilty_upload",
+            )
+
+        if not (gs_innocent or gs_guilty):
+            st.info("Upload .fif files for both groups to continue.")
+        else:
+            st.caption(
+                f"{len(gs_innocent or [])} innocent / "
+                f"{len(gs_guilty or [])} guilty file(s) selected."
+            )
+
+        # --- Search strategy ---
+        st.markdown("---")
+        _strategies = ["Grid Search"]
+        if _OPTUNA_AVAILABLE:
+            _strategies.append("Optuna (TPE)")
+        gs_strategy = st.radio(
+            "Search strategy",
+            _strategies,
+            horizontal=True,
+            key="gs_strategy",
+        )
+        if not _OPTUNA_AVAILABLE and len(_strategies) == 1:
+            st.caption(
+                "Install `optuna` (`pip install optuna`) to enable "
+                "Bayesian optimisation."
+            )
+
+        # --- Parameter grid ---
+        st.markdown("---")
+        st.subheader("Parameter Space")
+        st.caption(
+            "Enable parameters to search and set **discrete** candidate "
+            "values (Grid Search uses full factorial; Optuna-TPE samples "
+            "from the same finite lists). "
+            "Type comma-separated values in the text fields for extras. "
+            "Non-searched parameters use their defaults. "
+            "Ranking is by **ROC-AUC** (threshold is swept internally)."
+        )
+
+        # Helper: merge multiselect + custom text
+        def _merged_floats(ms_vals, txt, enabled):
+            if not enabled:
+                return []
+            custom = _parse_custom_floats(txt)
+            return sorted(set(ms_vals + custom))
+
+        # ---- Filtering ----
+        with st.expander("**Filtering**", expanded=True):
+            gs_preset_en = False
+            st.caption(
+                "IIR Butterworth bandpass + notch 50 Hz is always "
+                "applied. Tune HP/LP/order below."
+            )
+
+            gs_hp_en = st.checkbox(
+                "Search high-pass cutoff", value=True,
+                key="gs_hp_en",
+            )
+            _hp_c1, _hp_c2 = st.columns([2, 1])
+            with _hp_c1:
+                gs_hp_vals = st.multiselect(
+                    "High-pass (Hz) presets",
+                    [0.1, 0.3, 0.5, 0.7, 1.0, 1.5, 2.0],
+                    default=[0.1, 0.3, 0.5, 0.7],
+                    key="gs_hp_vals",
+                    disabled=not gs_hp_en,
+                )
+            with _hp_c2:
+                gs_hp_custom = st.text_input(
+                    "Custom HP values",
+                    placeholder="e.g. 0.05, 0.8",
+                    key="gs_hp_custom",
+                    disabled=not gs_hp_en,
+                )
+            gs_hp_all = _merged_floats(
+                gs_hp_vals, gs_hp_custom, gs_hp_en,
+            )
+
+            gs_lp_en = st.checkbox(
+                "Search low-pass cutoff", value=True,
+                key="gs_lp_en",
+            )
+            _lp_c1, _lp_c2 = st.columns([2, 1])
+            with _lp_c1:
+                gs_lp_vals = st.multiselect(
+                    "Low-pass (Hz) presets",
+                    [12.0, 15.0, 20.0, 25.0, 30.0, 40.0],
+                    default=[12.0, 15.0, 20.0, 30.0],
+                    key="gs_lp_vals",
+                    disabled=not gs_lp_en,
+                )
+            with _lp_c2:
+                gs_lp_custom = st.text_input(
+                    "Custom LP values",
+                    placeholder="e.g. 35, 45",
+                    key="gs_lp_custom",
+                    disabled=not gs_lp_en,
+                )
+            gs_lp_all = _merged_floats(
+                gs_lp_vals, gs_lp_custom, gs_lp_en,
+            )
+
+            gs_order_en = st.checkbox(
+                "Search IIR order (zero-phase Butterworth)",
+                value=True,
+                key="gs_order_en",
+            )
+            gs_order_vals = st.multiselect(
+                "IIR order presets",
+                [2, 3, 4, 6, 8],
+                default=[2, 3, 4],
+                key="gs_order_vals",
+                disabled=not gs_order_en,
+            )
+            gs_order_all = sorted(gs_order_vals) if gs_order_en else []
+
+        # ---- Epoching ----
+        with st.expander("**Epoching**", expanded=True):
+            gs_s1tmin_en = st.checkbox(
+                "Search S1 tmin", value=True, key="gs_s1tmin_en",
+            )
+            _tm_c1, _tm_c2 = st.columns([2, 1])
+            with _tm_c1:
+                gs_s1tmin_vals = st.multiselect(
+                    "S1 tmin (s) presets",
+                    [-0.5, -0.3, -0.2, -0.1],
+                    default=[-0.2],
+                    key="gs_s1tmin_vals",
+                    disabled=not gs_s1tmin_en,
+                )
+            with _tm_c2:
+                gs_s1tmin_custom = st.text_input(
+                    "Custom tmin",
+                    placeholder="e.g. -0.15",
+                    key="gs_s1tmin_custom",
+                    disabled=not gs_s1tmin_en,
+                )
+            gs_s1tmin_all = _merged_floats(
+                gs_s1tmin_vals, gs_s1tmin_custom, gs_s1tmin_en,
+            )
+
+            gs_s1tmax_en = st.checkbox(
+                "Search S1 tmax", value=True, key="gs_s1tmax_en",
+            )
+            _tx_c1, _tx_c2 = st.columns([2, 1])
+            with _tx_c1:
+                gs_s1tmax_vals = st.multiselect(
+                    "S1 tmax (s) presets",
+                    [0.6, 0.8, 1.0, 1.2],
+                    default=[1.0],
+                    key="gs_s1tmax_vals",
+                    disabled=not gs_s1tmax_en,
+                )
+            with _tx_c2:
+                gs_s1tmax_custom = st.text_input(
+                    "Custom tmax",
+                    placeholder="e.g. 0.9",
+                    key="gs_s1tmax_custom",
+                    disabled=not gs_s1tmax_en,
+                )
+            gs_s1tmax_all = _merged_floats(
+                gs_s1tmax_vals, gs_s1tmax_custom, gs_s1tmax_en,
+            )
+
+            gs_s1det_en = st.checkbox(
+                "Search S1 detrend", value=True, key="gs_s1det_en",
+            )
+            gs_s1det_vals = st.multiselect(
+                "S1 detrend",
+                ["DC offset (0)", "Linear (1)"],
+                default=["DC offset (0)"],
+                key="gs_s1det_vals",
+                disabled=not gs_s1det_en,
+            )
+
+            gs_rej_en = st.checkbox(
+                "Search S1 rejection method", value=True,
+                key="gs_rej_en",
+            )
+            _gs_rej_options = ["iqr", "zscore"]
+            if _AUTOREJECT_AVAILABLE:
+                _gs_rej_options.append("autoreject")
+            _gs_rej_default = (
+                ["autoreject", "iqr"]
+                if _AUTOREJECT_AVAILABLE
+                else ["iqr"]
+            )
+            gs_rej_vals = st.multiselect(
+                "S1 rejection",
+                _gs_rej_options,
+                default=_gs_rej_default,
+                key="gs_rej_vals",
+                disabled=not gs_rej_en,
+            )
+
+            _adaptive_selected = bool(
+                gs_rej_en
+                and {"iqr", "zscore"} & set(gs_rej_vals)
+            )
+            gs_k_en = st.checkbox(
+                "Search adaptive k (IQR / Z-score sensitivity)",
+                value=True,
+                key="gs_k_en",
+                disabled=not _adaptive_selected,
+                help=(
+                    "Used for IQR/Z-score epoch rejection and baseline QC. "
+                    "Grid Search and Optuna vary *k* only when rejection "
+                    "is IQR or Z-score."
+                ),
+            )
+            _k_c1, _k_c2 = st.columns([2, 1])
+            with _k_c1:
+                gs_k_vals = st.multiselect(
+                    "k presets",
+                    [1.5, 2.0, 2.5, 3.0, 3.5, 4.0],
+                    default=[1.5, 2.0, 2.5, 3.0],
+                    key="gs_k_vals",
+                    disabled=not (gs_k_en and _adaptive_selected),
+                )
+            with _k_c2:
+                gs_k_custom = st.text_input(
+                    "Custom k",
+                    placeholder="e.g. 2.8",
+                    key="gs_k_custom",
+                    disabled=not (gs_k_en and _adaptive_selected),
+                )
+            gs_k_all = _merged_floats(
+                gs_k_vals, gs_k_custom,
+                gs_k_en and _adaptive_selected,
+            )
+
+        # ---- P300 window ----
+        with st.expander("**P300 Window**", expanded=True):
+            gs_p300mode_en = st.checkbox(
+                "Search P300 window mode (individual vs static)",
+                value=True, key="gs_p300mode_en",
+            )
+            gs_p300mode_vals = st.multiselect(
+                "P300 window mode",
+                ["individual", "static"],
+                default=["individual", "static"],
+                key="gs_p300mode_vals",
+                disabled=not gs_p300mode_en,
+            )
+
+            st.markdown("**Individual window parameters** "
+                        "(used when mode = individual)")
+            gs_margin_en = st.checkbox(
+                "Search window margin", value=True,
+                key="gs_margin_en",
+            )
+            _mg_c1, _mg_c2 = st.columns([2, 1])
+            with _mg_c1:
+                gs_margin_vals = st.multiselect(
+                    "Margin \u00b1 (s) presets",
+                    [0.05, 0.10, 0.12, 0.15, 0.20, 0.25],
+                    default=[0.10, 0.15, 0.20],
+                    key="gs_margin_vals",
+                    disabled=not gs_margin_en,
+                )
+            with _mg_c2:
+                gs_margin_custom = st.text_input(
+                    "Custom margins",
+                    placeholder="e.g. 0.12",
+                    key="gs_margin_custom",
+                    disabled=not gs_margin_en,
+                )
+            gs_margin_all = _merged_floats(
+                gs_margin_vals, gs_margin_custom, gs_margin_en,
+            )
+
+            gs_srch_min_en = st.checkbox(
+                "Search peak search start", value=True,
+                key="gs_srch_min_en",
+            )
+            _smi_c1, _smi_c2 = st.columns([2, 1])
+            with _smi_c1:
+                gs_srch_min_vals = st.multiselect(
+                    "Peak search start (s) presets",
+                    [0.15, 0.20, 0.25, 0.30],
+                    default=[0.25, 0.30],
+                    key="gs_srch_min_vals",
+                    disabled=not gs_srch_min_en,
+                )
+            with _smi_c2:
+                gs_srch_min_custom = st.text_input(
+                    "Custom start",
+                    placeholder="e.g. 0.18",
+                    key="gs_srch_min_custom",
+                    disabled=not gs_srch_min_en,
+                )
+            gs_srch_min_all = _merged_floats(
+                gs_srch_min_vals, gs_srch_min_custom, gs_srch_min_en,
+            )
+
+            gs_srch_max_en = st.checkbox(
+                "Search peak search end", value=True,
+                key="gs_srch_max_en",
+            )
+            _smx_c1, _smx_c2 = st.columns([2, 1])
+            with _smx_c1:
+                gs_srch_max_vals = st.multiselect(
+                    "Peak search end (s) presets",
+                    [0.45, 0.50, 0.55, 0.60, 0.70, 0.80],
+                    default=[0.60, 0.70],
+                    key="gs_srch_max_vals",
+                    disabled=not gs_srch_max_en,
+                )
+            with _smx_c2:
+                gs_srch_max_custom = st.text_input(
+                    "Custom end",
+                    placeholder="e.g. 0.65",
+                    key="gs_srch_max_custom",
+                    disabled=not gs_srch_max_en,
+                )
+            gs_srch_max_all = _merged_floats(
+                gs_srch_max_vals, gs_srch_max_custom, gs_srch_max_en,
+            )
+
+            gs_erp_lp_en = st.checkbox(
+                "Search S2 ERP smoothing LP (peak detection)",
+                value=True, key="gs_erp_lp_en",
+            )
+            gs_erp_lp_none = st.checkbox(
+                "Include 'no smoothing' (None)",
+                value=True,
+                key="gs_erp_lp_none",
+                disabled=not gs_erp_lp_en,
+            )
+            _elp_c1, _elp_c2 = st.columns([2, 1])
+            with _elp_c1:
+                gs_erp_lp_vals = st.multiselect(
+                    "S2 ERP LP cutoff (Hz) presets",
+                    [6.0, 8.0, 10.0, 12.0, 15.0, 20.0],
+                    default=[6.0, 8.0, 10.0, 12.0],
+                    key="gs_erp_lp_vals",
+                    disabled=not gs_erp_lp_en,
+                )
+            with _elp_c2:
+                gs_erp_lp_custom = st.text_input(
+                    "Custom S2 ERP LP",
+                    placeholder="e.g. 14",
+                    key="gs_erp_lp_custom",
+                    disabled=not gs_erp_lp_en,
+                )
+            gs_erp_lp_all = _merged_floats(
+                gs_erp_lp_vals, gs_erp_lp_custom, gs_erp_lp_en,
+            )
+            if gs_erp_lp_en and gs_erp_lp_none:
+                gs_erp_lp_all = [None] + gs_erp_lp_all
+
+            st.markdown("**Static window parameters** "
+                        "(used when mode = static)")
+            gs_man_tmin_en = st.checkbox(
+                "Search static window start", value=True,
+                key="gs_man_tmin_en",
+            )
+            _mt_c1, _mt_c2 = st.columns([2, 1])
+            with _mt_c1:
+                gs_man_tmin_vals = st.multiselect(
+                    "Static window start (s) presets",
+                    [0.25, 0.30, 0.35, 0.40],
+                    default=[0.25, 0.30],
+                    key="gs_man_tmin_vals",
+                    disabled=not gs_man_tmin_en,
+                )
+            with _mt_c2:
+                gs_man_tmin_custom = st.text_input(
+                    "Custom start",
+                    placeholder="e.g. 0.28",
+                    key="gs_man_tmin_custom",
+                    disabled=not gs_man_tmin_en,
+                )
+            gs_man_tmin_all = _merged_floats(
+                gs_man_tmin_vals, gs_man_tmin_custom, gs_man_tmin_en,
+            )
+
+            gs_man_tmax_en = st.checkbox(
+                "Search static window end", value=True,
+                key="gs_man_tmax_en",
+            )
+            _mx_c1, _mx_c2 = st.columns([2, 1])
+            with _mx_c1:
+                gs_man_tmax_vals = st.multiselect(
+                    "Static window end (s) presets",
+                    [0.50, 0.55, 0.60, 0.65, 0.70, 0.80],
+                    default=[0.60, 0.70, 0.80],
+                    key="gs_man_tmax_vals",
+                    disabled=not gs_man_tmax_en,
+                )
+            with _mx_c2:
+                gs_man_tmax_custom = st.text_input(
+                    "Custom end",
+                    placeholder="e.g. 0.65",
+                    key="gs_man_tmax_custom",
+                    disabled=not gs_man_tmax_en,
+                )
+            gs_man_tmax_all = _merged_floats(
+                gs_man_tmax_vals, gs_man_tmax_custom, gs_man_tmax_en,
+            )
+
+        # ---- CTP-BAD ----
+        with st.expander("**CTP-BAD**", expanded=True):
+            gs_amp_en = st.checkbox(
+                "Search amplitude method", value=True,
+                key="gs_amp_en",
+            )
+            gs_amp_vals = st.multiselect(
+                "Amplitude method",
+                [
+                    "Mean",
+                    "Peak-to-peak (Rosenfeld)",
+                    "Peak-to-Peak (Peak-Valley)",
+                    "Baseline-to-peak",
+                ],
+                default=[
+                    "Mean",
+                    "Peak-to-peak (Rosenfeld)",
+                    "Peak-to-Peak (Peak-Valley)",
+                    "Baseline-to-peak",
+                ],
+                key="gs_amp_vals",
+                disabled=not gs_amp_en,
+            )
+
+            gs_smooth_en = st.checkbox(
+                "Search smoothing method", value=True,
+                key="gs_smooth_en",
+            )
+            gs_smooth_vals = st.multiselect(
+                "Smoothing",
+                ["None", "Low-pass (Butterworth)"],
+                default=["None", "Low-pass (Butterworth)"],
+                key="gs_smooth_vals",
+                disabled=not gs_smooth_en,
+            )
+
+            gs_smooth_hz_en = st.checkbox(
+                "Search epoch smoothing LP cutoff", value=True,
+                key="gs_smooth_hz_en",
+            )
+            _sh_c1, _sh_c2 = st.columns([2, 1])
+            with _sh_c1:
+                gs_smooth_hz_vals = st.multiselect(
+                    "Epoch smooth LP (Hz) presets",
+                    [6.0, 8.0, 10.0, 12.0, 15.0],
+                    default=[6.0, 8.0, 10.0, 12.0],
+                    key="gs_smooth_hz_vals",
+                    disabled=not gs_smooth_hz_en,
+                )
+            with _sh_c2:
+                gs_smooth_hz_custom = st.text_input(
+                    "Custom smooth LP",
+                    placeholder="e.g. 9",
+                    key="gs_smooth_hz_custom",
+                    disabled=not gs_smooth_hz_en,
+                )
+            gs_smooth_hz_all = _merged_floats(
+                gs_smooth_hz_vals, gs_smooth_hz_custom,
+                gs_smooth_hz_en,
+            )
+
+        # --- Global settings ---
+        st.markdown("---")
+        _gs_c1, _gs_c2 = st.columns(2)
+        with _gs_c1:
+            gs_n_boot = st.number_input(
+                "Bootstrap iterations (lower = faster search)",
+                100, 100000, 1000, 100,
+                key="gs_n_boot",
+            )
+            if gs_strategy == "Optuna (TPE)":
+                gs_n_trials = st.number_input(
+                    "Optuna trials", 10, 5000, 50, 10,
+                    key="gs_n_trials",
+                )
+        with _gs_c2:
+            _cpu_count = _os.cpu_count() or 4
+            gs_max_workers = st.slider(
+                "Parallel file workers",
+                1, min(_cpu_count, 8), min(4, _cpu_count),
+                key="gs_max_workers",
+                help=(
+                    "Number of threads for processing files in "
+                    "parallel within each trial. MNE releases the "
+                    "GIL for NumPy/SciPy, so threads give real "
+                    "speedup. Set to 1 to disable parallelism."
+                ),
+            )
+
+        gs_loocv = st.checkbox(
+            "Use Leave-One-Out CV for accuracy metrics",
+            value=True,
+            key="gs_loocv",
+            help=(
+                "When enabled, the accuracy / sensitivity / specificity "
+                "are computed via LOOCV: threshold is selected on N-1 "
+                "subjects (using F-beta) and tested on the held-out one. "
+                "AUC is always threshold-independent."
+            ),
+        )
+        gs_s2_mirror_s1 = st.checkbox(
+            "Mirror S2 epoch preprocessing to S1",
+            value=True,
+            key="gs_s2_mirror_s1",
+            help=(
+                "Copy **S1** epoch settings into **S2** target epochs used "
+                "for the individual P300 window: ``s1_tmin/tmax``, "
+                "baseline on/off, and detrend label. Recommended when "
+                "Optuna/Grid Search varies S1 epoch hyperparameters so "
+                "behavioural S2 ERP matches the same preprocessing."
+            ),
+        )
+        gs_fbeta = st.number_input(
+            "F-beta weight (β) for threshold selection",
+            min_value=0.1, max_value=5.0, value=1.0, step=0.1,
+            key="gs_fbeta",
+            help=(
+                "β controls the balance between precision and recall "
+                "when choosing the optimal threshold.  \n"
+                "**β = 1** → balanced F1.  \n"
+                "**β > 1** (e.g. 2) → prioritises sensitivity "
+                "(detecting guilty).  \n"
+                "**β < 1** (e.g. 0.5) → prioritises specificity "
+                "(protecting innocent)."
+            ),
+        )
+
+        # ===============================================================
+        # Assemble grid / Optuna param defs
+        # ===============================================================
+        grid_ranges = {}
+
+        if gs_preset_en:
+            grid_ranges['filter_preset'] = ['skip', 'aggressive']
+
+        if gs_hp_en and gs_hp_all:
+            grid_ranges['hp_cutoff'] = gs_hp_all
+
+        if gs_lp_en and gs_lp_all:
+            grid_ranges['lp_cutoff'] = gs_lp_all
+
+        if gs_order_en and gs_order_all:
+            grid_ranges['iir_order'] = gs_order_all
+
+        if gs_s1tmin_en and gs_s1tmin_all:
+            grid_ranges['s1_tmin'] = gs_s1tmin_all
+
+        if gs_s1tmax_en and gs_s1tmax_all:
+            grid_ranges['s1_tmax'] = gs_s1tmax_all
+
+        if gs_s1det_en and gs_s1det_vals:
+            grid_ranges['s1_detrend'] = gs_s1det_vals
+
+        if gs_rej_en and gs_rej_vals:
+            grid_ranges['s1_rejection'] = gs_rej_vals
+
+        if gs_k_en and gs_k_all:
+            grid_ranges['s1_adaptive_k'] = gs_k_all
+
+        if gs_p300mode_en and gs_p300mode_vals:
+            _mode_bools = []
+            if "individual" in gs_p300mode_vals:
+                _mode_bools.append(True)
+            if "static" in gs_p300mode_vals:
+                _mode_bools.append(False)
+            if len(_mode_bools) > 1:
+                grid_ranges['use_individual_window'] = _mode_bools
+
+        if gs_margin_en and gs_margin_all:
+            grid_ranges['window_margin'] = gs_margin_all
+
+        if gs_srch_min_en and gs_srch_min_all:
+            grid_ranges['peak_search_tmin'] = gs_srch_min_all
+
+        if gs_srch_max_en and gs_srch_max_all:
+            grid_ranges['peak_search_tmax'] = gs_srch_max_all
+
+        if gs_erp_lp_en and gs_erp_lp_all:
+            grid_ranges['s2_erp_lowpass_hz'] = gs_erp_lp_all
+
+        if gs_man_tmin_en and gs_man_tmin_all:
+            grid_ranges['manual_tmin'] = gs_man_tmin_all
+
+        if gs_man_tmax_en and gs_man_tmax_all:
+            grid_ranges['manual_tmax'] = gs_man_tmax_all
+
+        if gs_amp_en and gs_amp_vals:
+            grid_ranges['amplitude_method'] = gs_amp_vals
+
+        if gs_smooth_en and gs_smooth_vals:
+            grid_ranges['smoothing_method'] = gs_smooth_vals
+
+        if gs_smooth_hz_en and gs_smooth_hz_all:
+            grid_ranges['smoothing_lp_hz'] = gs_smooth_hz_all
+
+        optuna_params = []
+        optuna_adaptive_k_float_spec = None
+        if gs_strategy == "Optuna (TPE)":
+            if gs_preset_en:
+                optuna_params.append(
+                    ('filter_preset', 'cat', None, None,
+                     ['skip', 'aggressive']),
+                )
+            if gs_hp_en and gs_hp_all:
+                optuna_params.append(
+                    ('hp_cutoff', 'cat', None, None,
+                     sorted(set(gs_hp_all))),
+                )
+            if gs_lp_en:
+                optuna_params.append(
+                    ('lp_cutoff', 'int', 12, 30, 3),
+                )
+            if gs_order_en and gs_order_all:
+                optuna_params.append(
+                    ('iir_order', 'cat', None, None, list(gs_order_all)),
+                )
+            if gs_s1tmin_en and gs_s1tmin_all:
+                optuna_params.append(
+                    ('s1_tmin', 'cat', None, None,
+                     sorted(set(gs_s1tmin_all))),
+                )
+            if gs_s1tmax_en and gs_s1tmax_all:
+                optuna_params.append(
+                    ('s1_tmax', 'cat', None, None,
+                     sorted(set(gs_s1tmax_all))),
+                )
+            if gs_s1det_en and gs_s1det_vals:
+                optuna_params.append(
+                    ('s1_detrend', 'cat', None, None, list(gs_s1det_vals)),
+                )
+            if gs_rej_en and gs_rej_vals:
+                optuna_params.append(
+                    ('s1_rejection', 'cat', None, None, list(gs_rej_vals)),
+                )
+            if gs_k_en and gs_k_all:
+                optuna_adaptive_k_float_spec = (1.5, 3.0, 0.5)
+
+            if gs_p300mode_en and gs_p300mode_vals:
+                _mode_bools_o = []
+                if "individual" in gs_p300mode_vals:
+                    _mode_bools_o.append(True)
+                if "static" in gs_p300mode_vals:
+                    _mode_bools_o.append(False)
+                if len(_mode_bools_o) > 1:
+                    optuna_params.append(
+                        ('use_individual_window', 'cat', None, None,
+                         _mode_bools_o),
+                    )
+
+            if gs_margin_en:
+                optuna_params.append(
+                    ('window_margin', 'float', 0.10, 0.20, 0.05),
+                )
+            if gs_srch_min_en:
+                optuna_params.append(
+                    ('peak_search_tmin', 'float', 0.25, 0.35, 0.05),
+                )
+            if gs_srch_max_en:
+                optuna_params.append(
+                    ('peak_search_tmax', 'float', 0.60, 0.75, 0.05),
+                )
+            if gs_erp_lp_en and gs_erp_lp_all:
+                optuna_params.append(
+                    ('s2_erp_lowpass_hz', 'cat', None, None,
+                     list(gs_erp_lp_all)),
+                )
+            if gs_man_tmin_en:
+                optuna_params.append(
+                    ('manual_tmin', 'float', 0.25, 0.35, 0.05),
+                )
+            if gs_man_tmax_en:
+                optuna_params.append(
+                    ('manual_tmax', 'float', 0.60, 0.80, 0.05),
+                )
+
+            if gs_amp_en and gs_amp_vals:
+                optuna_params.append(
+                    ('amplitude_method', 'cat', None, None,
+                     list(gs_amp_vals)),
+                )
+            if gs_smooth_en and gs_smooth_vals:
+                optuna_params.append(
+                    ('smoothing_method', 'cat', None, None,
+                     list(gs_smooth_vals)),
+                )
+            if gs_smooth_hz_en:
+                optuna_params.append(
+                    ('smoothing_lp_hz', 'float', 6.0, 12.0, 2.0),
+                )
+
+        has_params = bool(grid_ranges) or (
+            gs_strategy == "Optuna (TPE)" and bool(optuna_params)
+        )
+        if gs_strategy == "Grid Search":
+            n_combos = (
+                _grid_space_size(grid_ranges) if has_params else 0
+            )
+        else:
+            n_combos = gs_n_trials if has_params else 0
+
+        n_files = len(gs_innocent or []) + len(gs_guilty or [])
+        n_runs = n_combos * n_files
+
+        st.markdown("---")
+        if gs_strategy == "Grid Search":
+            st.markdown(
+                f"**Grid size:** {n_combos} combinations "
+                f"\u00d7 {n_files} files = **{n_runs} pipeline "
+                f"runs**"
+            )
+            if n_combos > 500_000:
+                st.error(
+                    f"Grid has **{n_combos:,}** combinations — this "
+                    f"would exhaust all RAM. Reduce candidate values "
+                    f"or switch to Optuna."
+                )
+            elif n_combos > 200:
+                st.warning(
+                    "Large grid! Consider reducing candidate values "
+                    "or switching to Optuna."
+                )
+        else:
+            st.markdown(
+                f"**Optuna:** {n_combos} trials "
+                f"\u00d7 {n_files} files = **{n_runs} pipeline "
+                f"runs**"
+            )
+
+        # ===============================================================
+        # Optuna Resume
+        # ===============================================================
+        _resume_study = None
+        if gs_strategy == "Optuna (TPE)":
+            with st.expander("Resume from saved Optuna study", expanded=False):
+                uploaded_study = st.file_uploader(
+                    "Upload .pkl study file",
+                    type=["pkl"],
+                    key="gs_upload_study",
+                )
+                if uploaded_study is not None:
+                    try:
+                        _resume_data = pickle.loads(uploaded_study.read())
+                        _resume_study = _resume_data['study']
+                        _prev_params = _resume_data.get('param_defs', [])
+                        _prev_n = len(_resume_study.trials)
+                        st.success(
+                            f"Loaded study with {_prev_n} completed "
+                            f"trials (best AUC: "
+                            f"{_resume_study.best_value:.4f})."
+                        )
+                        _prev_keys = sorted(
+                            k for k, *_ in _prev_params
+                        )
+                        _curr_keys = sorted(
+                            k for k, *_ in optuna_params
+                        )
+                        if _prev_keys != _curr_keys:
+                            st.warning(
+                                f"Parameter mismatch! Saved: "
+                                f"{_prev_keys}, current: "
+                                f"{_curr_keys}. The study will "
+                                f"resume with current parameters "
+                                f"but prior trials keep their "
+                                f"original values."
+                            )
+                        st.info(
+                            f"Click **Run Optuna Search** to add "
+                            f"{gs_n_trials} new trials on top of "
+                            f"the {_prev_n} existing ones."
+                        )
+                    except Exception as exc:
+                        st.error(f"Failed to load study: {exc}")
+
+        # ===============================================================
+        # Run / Stop
+        # ===============================================================
+        _grid_too_large = (
+            gs_strategy == "Grid Search" and n_combos > 500_000
+        )
+        can_run = (
+            has_params
+            and (gs_innocent or gs_guilty)
+            and not _grid_too_large
+        )
+
+        run_col, stop_col = st.columns([2, 1])
+        with run_col:
+            run_clicked = st.button(
+                (
+                    "\u25b6\ufe0f Run Grid Search"
+                    if gs_strategy == "Grid Search"
+                    else "\u25b6\ufe0f Run Optuna Search"
+                ),
+                type="primary",
+                key="gs_run",
+                disabled=not can_run,
+            )
+        with stop_col:
+            def _set_stop():
+                st.session_state['_gs_stop'] = True
+
+            st.button(
+                "\u23f9\ufe0f Stop after current combo",
+                key="gs_stop",
+                on_click=_set_stop,
+                help=(
+                    "Sets a stop flag checked between iterations. "
+                    "Partial results will be preserved."
+                ),
+            )
+
+        if run_clicked:
+            st.session_state['_gs_stop'] = False
+            st.session_state.pop('_gs_partial', None)
+            st.session_state.pop('grid_search_results', None)
+            st.session_state.pop('_optuna_study', None)
+            st.session_state.pop('_gs_optuna_show_hist', None)
+
+            progress = st.progress(0, text="Loading files\u2026")
+            status = st.empty()
+
+            innocent_data = []
+            for i, f in enumerate(gs_innocent or []):
+                status.text(f"Loading innocent {f.name}\u2026")
+                tmp = Path(f"_tmp_gs_i{i}.fif")
+                tmp.write_bytes(f.read())
+                raw, events, event_id = load_fif_file(str(tmp))
+                tmp.unlink(missing_ok=True)
+                innocent_data.append(
+                    (raw, events, event_id, f.name),
+                )
+
+            guilty_data = []
+            for i, f in enumerate(gs_guilty or []):
+                status.text(f"Loading guilty {f.name}\u2026")
+                tmp = Path(f"_tmp_gs_g{i}.fif")
+                tmp.write_bytes(f.read())
+                raw, events, event_id = load_fif_file(str(tmp))
+                tmp.unlink(missing_ok=True)
+                guilty_data.append(
+                    (raw, events, event_id, f.name),
+                )
+
+            base_cfg = {
+                'filter_preset': 'aggressive',
+                'notch_freqs': [50],
+                'hp_cutoff': 0.7,
+                'lp_cutoff': 30.0,
+                'filter_method': 'iir',
+                'iir_order': 4,
+                's2_tmin': -0.2,
+                's2_tmax': 0.8,
+                's2_baseline': True,
+                's2_detrend': 'DC offset (0)',
+                's2_rejection': (
+                    'autoreject' if _AUTOREJECT_AVAILABLE
+                    else 'iqr'
+                ),
+                's2_threshold_uv': None,
+                'use_individual_window': True,
+                'peak_channels': ['Pz'],
+                'peak_search_tmin': 0.25,
+                'peak_search_tmax': 0.60,
+                'window_margin': 0.15,
+                's2_erp_lowpass_hz': 12.0,
+                'manual_tmin': 0.3,
+                'manual_tmax': 0.6,
+                's1_tmin': -0.2,
+                's1_tmax': 0.8,
+                's1_baseline': True,
+                's1_detrend': 'DC offset (0)',
+                's1_rejection': (
+                    'autoreject' if _AUTOREJECT_AVAILABLE
+                    else 'iqr'
+                ),
+                's1_threshold_uv': None,
+                's1_adaptive_k': 3.0,
+                's2_trial_rejection': True,
+                's2_max_rt': 1.0,
+                'bad_channels': ['Pz'],
+                'amplitude_method': 'Peak-to-Peak (Peak-Valley)',
+                'p2p_tmax_negative': 0.9,
+                'smoothing_method': 'Low-pass (Butterworth)',
+                'smoothing_lp_hz': 12.0,
+                'smoothing_ma_ms': 100.0,
+                'n_bootstrap': int(gs_n_boot),
+                'guilty_threshold': 0.90,
+                'target_stim': None,
+                'baseline_stims': None,
+                's2_match_s1_preprocessing': gs_s2_mirror_s1,
+                'ar_n_jobs': 1,
+            }
+
+            if gs_strategy == "Grid Search":
+                grid_space = _build_grid_space(grid_ranges)
+                gs_results = _run_grid_search(
+                    innocent_data, guilty_data,
+                    base_cfg, grid_space,
+                    progress, status,
+                    use_loocv=gs_loocv,
+                    fbeta_weight=gs_fbeta,
+                    max_workers=gs_max_workers,
+                )
+            else:
+                gs_results = _run_optuna_search(
+                    innocent_data, guilty_data,
+                    base_cfg, optuna_params,
+                    gs_n_trials,
+                    progress, status,
+                    use_loocv=gs_loocv,
+                    fbeta_weight=gs_fbeta,
+                    study=_resume_study,
+                    max_workers=gs_max_workers,
+                    adaptive_k_float_spec=optuna_adaptive_k_float_spec,
+                )
+                st.session_state['_optuna_param_defs'] = optuna_params
+                st.session_state['_optuna_base_cfg'] = base_cfg
+            st.session_state['grid_search_results'] = gs_results
+            st.session_state['grid_search_loocv'] = gs_loocv
+
+        # --- Optuna study download ---
+        _saved_study = st.session_state.get('_optuna_study')
+        if _saved_study is not None:
+            _study_payload = {
+                'study': _saved_study,
+                'param_defs': st.session_state.get(
+                    '_optuna_param_defs', [],
+                ),
+                'base_cfg': st.session_state.get(
+                    '_optuna_base_cfg', {},
+                ),
+            }
+            _pkl_buf = pickle.dumps(_study_payload)
+            _n_done = len(_saved_study.trials)
+            st.download_button(
+                f"Download Optuna study ({_n_done} trials)",
+                data=_pkl_buf,
+                file_name="optuna_study.pkl",
+                mime="application/octet-stream",
+                key="gs_download_study",
+            )
+
+            st.markdown("---")
+            st.subheader("Optuna visualization")
+            st.caption(
+                "Built-in Optuna visualization (Plotly): objective vs trial "
+                "from plot_optimization_history (objective = ROC-AUC here)."
+            )
+            if _OPTUNA_VIZ_AVAILABLE and plot_optimization_history is not None:
+                _ov_c1, _ov_c2 = st.columns(2)
+                with _ov_c1:
+                    if st.button(
+                        "Generate optimization history plot",
+                        key="gs_btn_optuna_optimization_history",
+                        help=(
+                            "Interactive Plotly figure from "
+                            "optuna.visualization.plot_optimization_history."
+                        ),
+                    ):
+                        st.session_state['_gs_optuna_show_hist'] = True
+                with _ov_c2:
+                    if st.button(
+                        "Hide optimization history plot",
+                        key="gs_hide_optuna_hist",
+                    ):
+                        st.session_state['_gs_optuna_show_hist'] = False
+
+                if st.session_state.get('_gs_optuna_show_hist'):
+                    try:
+                        _hist_fig = plot_optimization_history(_saved_study)
+                        st.plotly_chart(
+                            _hist_fig,
+                            use_container_width=True,
+                            key="gs_plotly_optuna_history",
+                        )
+                    except Exception as _hist_exc:
+                        st.session_state['_gs_optuna_show_hist'] = False
+                        st.error(
+                            "Could not render optimization history: "
+                            f"{_hist_exc}"
+                        )
+            else:
+                st.info(
+                    "Install **plotly** to enable Optuna charts "
+                    "(e.g. `pip install plotly`)."
+                )
+
+        gs_res = st.session_state.get('grid_search_results')
+        if gs_res:
+            _display_grid_search_results(
+                gs_res,
+                use_loocv=st.session_state.get(
+                    'grid_search_loocv', False,
+                ),
+            )
+
+    # ========================================================================
+    # Page 9: Export Results
     # ========================================================================
     
-    elif page == "📉 Export Results":
-        st.header("📉 Export Results")
+    elif page == "\U0001f4c9 Export Results":
+        st.header("\U0001f4c9 Export Results")
         
         if st.session_state.raw is None:
             st.warning("⚠️ No data loaded")
