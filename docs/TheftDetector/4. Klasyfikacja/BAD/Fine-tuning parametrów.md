@@ -65,7 +65,7 @@ Parametr $\beta$ decyduje o tym, która z tych wartości jest dla nas ważniejsz
 3. Wybór metryki optymalizacyjnej: Algorytm wybiera ten próg, który na tych 11 osobach daje najwyższą wybraną metrykę (F-beta).
 4. Testowanie: Mając ten "wyuczony" próg (np. 0.82), aplikujemy go na tej 1 odłożonej osobie. Jeśli jej wynik BAD wynosi 0.88 (powyżej progu), klasyfikujemy ją jako "Złodzieja". Sprawdzamy, czy decyzja zgadza się z prawdą (uzyskujemy True Positive, False Positive, True Negative lub False Negative).
 5. Rotacja: Zwracamy osobę do puli, wyciągamy kolejną i powtarzamy cały proces od nowa (kroki 1-4). Powstanie 12 unikalnych modeli z potencjalnie 12 różnymi progami.
-6. Agregacja: Na koniec zliczamy wszystkie poprawne i niepoprawne klasyfikacje dla tych 12 niezależnych testów, obliczając ostateczną czułość, swoistość i dokładność całego Twojego pipeline'u.
+6. Agregacja: Na koniec zliczamy wszystkie poprawne i niepoprawne klasyfikacje dla tych 12 niezależnych testów, obliczając ostateczną czułość, swoistość i dokładność całego pipeline'u.
 
 ##### Szczegółowo
 #### Krok 1: Przetwarzanie sygnału i ekstrakcja cechy (BAD)
