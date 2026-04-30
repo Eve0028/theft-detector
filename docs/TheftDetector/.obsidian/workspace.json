@@ -27,12 +27,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "4. Klasyfikacja/BAD/Fine-tuning parametrów.md",
+                "file": "4. Klasyfikacja/BAD/Wyniki/Wynik 1.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "Fine-tuning parametrów"
+              "title": "Wynik 1"
             }
           }
         ],
@@ -109,7 +109,7 @@
             "state": {
               "type": "backlink",
               "state": {
-                "file": "4. Klasyfikacja/BAD/Fine-tuning parametrów.md",
+                "file": "4. Klasyfikacja/BAD/Wyniki/Wynik 1.md",
                 "collapseAll": false,
                 "extraContext": false,
                 "sortOrder": "alphabetical",
@@ -119,7 +119,7 @@
                 "unlinkedCollapsed": true
               },
               "icon": "links-coming-in",
-              "title": "Backlinks for Fine-tuning parametrów"
+              "title": "Backlinks for Wynik 1"
             }
           },
           {
@@ -186,18 +186,19 @@
   },
   "active": "242cee0aed9a7c11",
   "lastOpenFiles": [
+    "4. Klasyfikacja/BAD/2. Parametry - opis.md",
+    "4. Klasyfikacja/BAD/3. Fine-tuning parametrów.md",
+    "4. Klasyfikacja/BAD/1. Metoda BAD.md",
+    "3. Preprocessing/Preprocessing - BrainAccess.md",
+    "3. Preprocessing/Autoreject - odrzucanie artefaktów.md",
+    "3. Preprocessing/Badania/Metoda statystyczna wykrywania P300.md",
+    "3. Preprocessing/Badania/Wybór okna P300.md",
     "5. PRACA MGR/PLAN/1. Wstep.md",
-    "4. Klasyfikacja/BAD/Fine-tuning parametrów.md",
-    "4. Klasyfikacja/BAD/Metoda BAD.md",
     "4. Klasyfikacja/BAD/Wyniki/Wynik 1.md",
     "4. Klasyfikacja/BAD/Wyniki",
     "TODO.md",
     "Prezentacja.md",
-    "3. Preprocessing/Badania/Wybór okna P300.md",
-    "3. Preprocessing/Badania/Metoda statystyczna wykrywania P300.md",
     "4. Klasyfikacja/BAD",
-    "3. Preprocessing/Preprocessing - BrainAccess.md",
-    "3. Preprocessing/Autoreject - odrzucanie artefaktów.md",
     "3. Preprocessing/Konfiguracja pipelineu/Test 3.md",
     "3. Preprocessing/Konfiguracja pipelineu/Test 2.md",
     "3. Preprocessing/Konfiguracja pipelineu/Test 1.md",
@@ -216,7 +217,6 @@
     "pipeline-1_incorrect-3.png",
     "2. Eksperyment/Paradygmaty wykrywania ukrytej informacji/WYBRANA Metoda - CTP/CTP - Pipeline sesji - końcowy.md",
     "1. Dokumenty - do druku/Dla uczestnika - Ankieta wstępna.md",
-    "1. Dokumenty - do druku/Mail do uczestników - przed badaniem.md",
     "5. PRACA MGR/PLAN",
     "5. PRACA MGR",
     "4. Klasyfikacja/ML",

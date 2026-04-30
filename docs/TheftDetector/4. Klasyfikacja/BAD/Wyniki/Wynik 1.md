@@ -1,3 +1,5 @@
+Optuna - **200** triali
+
 ROC-AUC
 0.9333
 
@@ -20,6 +22,7 @@ Specificity
 
 
 ### Parametry
+```
 {
   "filter_preset": "aggressive",
   "notch_freqs": [
@@ -69,3 +72,5 @@ Specificity
   "s2_match_s1_preprocessing": true,
   "ar_n_jobs": 1
 }
+```
+```
