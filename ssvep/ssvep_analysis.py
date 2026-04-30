@@ -93,7 +93,7 @@ def compute_power_spectrum(
     ).T
     if car and filtered.shape[1] > 1:
         filtered = common_average_reference(filtered, axis=1)
-    ch_series = np.mean(filtered, axis=0)
+    ch_series = np.mean(filtered, axis=1)
     freqs = np.arange(freq_min_hz, freq_max_hz + step_hz * 0.5, step_hz)
     powers = np.array([
         power_at_frequency(ch_series, fs, f, tol_hz=tol_hz, use_second_harmonic=False)
@@ -172,7 +172,7 @@ def detect_ssvep(
     ).T
     if car and filtered.shape[1] > 1:
         filtered = common_average_reference(filtered, axis=1)
-    ch_series = np.mean(filtered, axis=0)
+    ch_series = np.mean(filtered, axis=1)
     p_left = power_at_frequency(
         ch_series, fs, freq_left_hz,
         tol_hz=freq_tol_hz,
@@ -304,7 +304,7 @@ def detect_ssvep_multi(
         ).T
         if car and filtered.shape[1] > 1:
             filtered = common_average_reference(filtered, axis=1)
-        ch_series = np.mean(filtered, axis=0)
+        ch_series = np.mean(filtered, axis=1)
         scores = [
             power_at_frequency(
                 ch_series, fs, f,

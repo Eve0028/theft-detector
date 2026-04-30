@@ -33,18 +33,23 @@ signal_check:
 
 # Preprocessing (applied before SSVEP frequency detection)
 preprocessing:
-  bandpass_low_hz: 7.0
-  bandpass_high_hz: 20.0
+  # Bandpass must cover fundamentals (6, 7.5, 15 Hz) and their 2nd harmonics
+  # (12, 15, 30 Hz) used by CCA (cca_n_harmonics=2).
+  bandpass_low_hz: 5.0
+  bandpass_high_hz: 35.0
   filter_order: 4
   # If true, subtract channel mean from each channel (common-average reference)
   common_average_reference: false
 
 # SSVEP stimulus: three flickering targets + optional rest (static square)
 stimulus:
-  # Frequencies in Hz (within 3.5–75 Hz; avoid 50 Hz line noise)
-  frequency_left_hz: 10.0
-  frequency_center_hz: 12.5
-  frequency_right_hz: 14.28
+  # Frequencies MUST be exact sub-multiples of refresh_rate_hz for stable flicker.
+  # For 60 Hz: f = 60 / (2*N) → 30, 15, 10, 7.5, 6, 5 Hz.
+  # Avoid alpha band (8–13 Hz) — endogenous alpha dominates occipital EEG and
+  # interferes with SSVEP detection. Chosen: 6 / 7.5 / 15 Hz (all outside alpha).
+  frequency_left_hz: 6.0
+  frequency_center_hz: 7.5
+  frequency_right_hz: 15.0
   # Rest state: when no target dominates (look at static square or away)
   rest_enabled: true
   # Analysis window length in seconds (longer = more stable, slower response)
@@ -75,8 +80,8 @@ display:
   height: 720
   fullscreen: false
   # Monitor refresh rate (Hz). When set, flicker is synced to frames for stable SSVEP.
-  # Choose stimulus frequencies as sub-multiples of half refresh (e.g. 60 Hz -> 30, 15, 10, 7.5...).
-  refresh_rate_hz: 100
+  # For 60 Hz: valid sub-multiples → 30, 15, 10, 7.5, 6, 5 Hz.
+  refresh_rate_hz: 60
   background_rgb: [30, 30, 35]
   # Left, center, right square colors (RGB) when not "detected"; default white
   square_color_left: [255, 255, 255]
@@ -89,7 +94,8 @@ display:
   square_size_px: 120
   # Flicker: alternate between color and black every half-period
   flicker_black: true
-  # Power chart (F2 = separate window); frequency range for that chart
+  # Power chart (F2 = separate window); frequency range covers fundamentals
+  # (7.5, 10, 15 Hz) and their 2nd harmonics (15, 20, 30 Hz).
   power_chart_freq_min: 5.0
-  power_chart_freq_max: 16.0
-  power_chart_step_hz: 0.5
+  power_chart_freq_max: 35.0
+  power_chart_step_hz: 0.25

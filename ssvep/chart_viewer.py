@@ -36,7 +36,6 @@ def main() -> None:
     ax.set_ylabel("Power", color="#aaa")
     ax.set_title("Power spectrum (SSVEP)", color="#ccc")
     line, = ax.plot([], [], color="#50b4dc", linewidth=1.5)
-    ax.set_xlim(5, 16)
     ax.set_ylim(0, 1)
     if fig.canvas.manager is not None:
         getattr(fig.canvas.manager, "set_window_title", lambda _: None)("SSVEP Power")
@@ -54,6 +53,7 @@ def main() -> None:
                         powers = np.asarray(data["powers"])
                         if len(freqs) and len(powers):
                             line.set_data(freqs, powers)
+                            ax.set_xlim(float(freqs[0]), float(freqs[-1]))
                             p_max = float(np.max(powers)) or 1e-12
                             ax.set_ylim(0, p_max * 1.05)
                             ax.figure.canvas.draw_idle()

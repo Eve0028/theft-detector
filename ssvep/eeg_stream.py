@@ -18,10 +18,12 @@ try:
     from brainaccess.core import scan as ba_scan
     from brainaccess.core import init as ba_init
     from brainaccess.core import close as ba_close
+    from brainaccess.core.eeg_channel import ELECTRODE_MEASUREMENT as _BA_ELECTRODE
     from brainaccess.utils.exceptions import BrainAccessException
     BRAINACCESS_AVAILABLE = True
 except Exception:
     BRAINACCESS_AVAILABLE = False
+    _BA_ELECTRODE = 1  # fallback: ELECTRODE_MEASUREMENT = 1 per SDK docs
 
 # Default physical channel mapping (BrainAccess CAP cable layout)
 DEFAULT_CHANNEL_MAPPING = {
@@ -93,36 +95,52 @@ class EEGStream:
                 return False
             self._eeg_manager.connect(devices[0].name)
             self._setup_channels()
-            self._eeg_manager.set_callback_chunk(self._on_chunk)
             try:
                 self._eeg_manager.load_config()
             except Exception:
                 pass
             self._eeg_manager.start_stream()
             self._build_chunk_index_map()
+            self._eeg_manager.set_callback_chunk(self._on_chunk)
             self.is_connected = True
             return True
         except Exception:
             return False
 
     def _setup_channels(self) -> None:
+        """Enable requested electrode channels, disable the rest.
+
+        ``set_channel_enabled`` takes a channel **address**, not a physical
+        index.  EEG electrodes start at ``ELECTRODE_MEASUREMENT`` (=1), so
+        physical channel N lives at address ``ELECTRODE_MEASUREMENT + N``.
+        """
         if self._eeg_manager is None:
             return
-        for idx in set(self.channel_mapping.values()):
+        _MAX_ELECTRODE_CHANNELS = 8
+        active = set(self.channel_mapping.values())
+        for idx in range(_MAX_ELECTRODE_CHANNELS):
+            addr = _BA_ELECTRODE + idx
             try:
-                self._eeg_manager.set_channel_enabled(idx, True)
+                self._eeg_manager.set_channel_enabled(addr, idx in active)
             except Exception:
                 pass
 
     def _build_chunk_index_map(self) -> None:
+        """Map electrode names to chunk array indices.
+
+        ``get_channel_index`` takes a channel **address** (``ELECTRODE_MEASUREMENT + N``),
+        not the raw physical index.  Passing the physical index directly would return the
+        chunk index for address 0 (SAMPLE_NUMBER), causing a sample-counter read.
+        """
         if self._eeg_manager is None:
             return
         self.chunk_index_map.clear()
         for ch in self.channels:
             phys = self.channel_mapping.get(ch, -1)
             if phys >= 0:
+                addr = _BA_ELECTRODE + phys
                 try:
-                    self.chunk_index_map[ch] = self._eeg_manager.get_channel_index(phys)
+                    self.chunk_index_map[ch] = self._eeg_manager.get_channel_index(addr)
                 except Exception:
                     pass
 
