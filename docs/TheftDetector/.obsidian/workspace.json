@@ -27,12 +27,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "4. Klasyfikacja/BAD/Wyniki/Wynik 1.md",
+                "file": "4. Klasyfikacja/BAD/3. Fine-tuning parametrów.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "Wynik 1"
+              "title": "3. Fine-tuning parametrów"
             }
           }
         ],
@@ -186,6 +186,7 @@
   },
   "active": "242cee0aed9a7c11",
   "lastOpenFiles": [
+    "4. Klasyfikacja/BAD/Wyniki/Wynik 1.md",
     "4. Klasyfikacja/BAD/2. Parametry - opis.md",
     "4. Klasyfikacja/BAD/3. Fine-tuning parametrów.md",
     "4. Klasyfikacja/BAD/1. Metoda BAD.md",
@@ -194,7 +195,6 @@
     "3. Preprocessing/Badania/Metoda statystyczna wykrywania P300.md",
     "3. Preprocessing/Badania/Wybór okna P300.md",
     "5. PRACA MGR/PLAN/1. Wstep.md",
-    "4. Klasyfikacja/BAD/Wyniki/Wynik 1.md",
     "4. Klasyfikacja/BAD/Wyniki",
     "TODO.md",
     "Prezentacja.md",
