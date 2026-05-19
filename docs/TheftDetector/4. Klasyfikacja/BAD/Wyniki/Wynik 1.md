@@ -19,7 +19,27 @@ Specificity
 | --------------- | ----------- | -------------- |
 | Actual GUILTY   | 4           | 2              |
 | Actual INNOCENT | 1           | 4              |
+1. Filtering:
+	- High-pass (Hz): 0.3
+	- Low-pass (Hz): 24
+	- IIR order: 3
 
+2. Epoching:
+	- S1 rejection method: autoreject
+	- Search adaptive k (IQR or Z-score sensitivity): 3.0
+
+3. P300 Window:
+	- P300 window mode: individual
+	- Individual window parameters:
+		- Margin ± (s): 0.15
+		- Peak search start (s): 0.25
+		- Peak search end (s): 0.75
+		- S2 ERP LP cutoff (Hz) (with 'None' smoothing possibility): 10.0
+
+4. CTP-BAD
+	- Amplitude method: peak-to-peak (Peak-Valley)
+	- Smoothing: low-pass (butterworth)
+	- Epoch smooth LP (Hz): 10.0
 
 ### Parametry
 ```
