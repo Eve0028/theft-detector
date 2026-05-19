@@ -144,7 +144,6 @@ ROC-AUC mierzy zdolność `max_prop` do odróżnienia grup guilty/innocent nieza
 
 | Termin      | Znaczenie                                                                                        |
 | ----------- | ------------------------------------------------------------------------------------------------ |
-| TPE         | Tree-structured Parzen Estimator - algorytm bayesowski wybierający następny punkt przeszukiwania |
 | [cat]       | Parametr kategoryczny: losowany z podanej listy wartości                                         |
 | [int]       | Parametr całkowity z krokiem: np. lp_cutoff ∈ {12, 15, 18, …, 30} Hz                             |
 | [float]     | Parametr zmiennoprzecinkowy z krokiem: np. margines ∈ {0.10, 0.15, 0.20} s                       |
@@ -153,7 +152,6 @@ ROC-AUC mierzy zdolność `max_prop` do odróżnienia grup guilty/innocent nieza
 | p2p-R       | peak-to-peak (Rosenfeld): szczyt dodatni minus dolina ujemna po nim                              |
 | p2p-V       | peak-to-peak (Peak-Valley): globalny max minus globalny min w oknie                              |
 | F-β (β=0.5) | Ważona miara F: β < 1 premiuje specyficzność (ochronę niewinnych) ponad czułość                  |
-| LOOCV       | Leave-One-Out Cross-Validation - patrz Diagram 3                                                 |
 
 
 ---
@@ -202,74 +200,77 @@ Procedura LOOCV jest identyczna z tą w ocenie trialu Optuny. Jedyna różnica t
 
 | Termin             | Znaczenie                                                                                                   |
 | ------------------ | ----------------------------------------------------------------------------------------------------------- |
-| LOOCV              | Leave-One-Out CV: N foldów, w każdym jeden uczestnik jest walidacyjny, reszta treningowa                    |
 | sweep 201 progów   | Dla każdego możliwego progu od 0 do 1 (201 równomiernych kroków) sprawdź F-β na zbiorze treningowym         |
 | resubstitution AUC | AUC liczone na wszystkich N wynikach bez podziału na foldy - mierzy separowalność grup, nie zależy od progu |
-| Sensitivity        | Czułość = TP / (TP+FN): odsetek rzeczywiście winnych, których poprawnie wykryto                             |
-| Specificity        | Swoistość = TN / (TN+FP): odsetek rzeczywiście niewinnych, których poprawnie oczyszczono z zarzutów                    |
 
 
 ---
 
-## Diagram 4 - Najlepsza konfiguracja i wyniki
+## Najlepsza konfiguracja i wyniki (trial wygrywający Optuny)
 
-Najlepsza konfiguracja z 200 triali Optuny.
+Najlepsza konfiguracja z 200 triali Optuny. Pokazane metryki pochodzą z oceny tego konkretnego trialu (N_bootstrap = 1000 | LOOCV | F-β = 0.5 | Mirror S2→S1) - nie z oddzielnego uruchomienia Quick Pipeline (Diagram 3).
 
-```mermaid
-flowchart LR
-    subgraph BEST_CFG["Najlepsza konfiguracja (trial wygrywający)"]
-        direction TB
+### Parametry
 
-        subgraph F["Filtracja"]
-            F1["High-pass:  0.3 Hz\nLow-pass:   24 Hz  ← wartość int krokowa, krok 3 Hz\nRząd IIR:   3\nNotch:      50 Hz"]
-        end
+**Filtracja**
 
-        subgraph EP["Epoching S1 i S2"]
-            EP1["Okno:       −0.2 s – 1.0 s po bodźcu\nDetrend:    DC offset (odjęcie średniej linii bazowej)\nOdrzucanie: autoreject\n            (adaptive_k nie jest próbkowane -\n             autoreject wyznacza próg automatycznie)\nMirror S2→S1: TAK"]
-        end
+| Parametr | Wartość | Uwaga |
+| -------- | ------- | ----- |
+| High-pass | 0.3 Hz | |
+| Low-pass | 24 Hz | |
+| Rząd IIR | 3 | |
+| Notch | 50 Hz | |
 
-        subgraph P300["Okno P300: individual (indywidualne)"]
-            P1["Przeszukiwany przedział: 0.25 – 0.75 s\nMargines ±: 0.15 s\nWygładzenie ERP S2: 10 Hz LP\n→ okno = czas szczytu P300 ± 0.15 s (różne per uczestnik)"]
-        end
+**Epokowanie S1 i S2**
 
-        subgraph BAD["CTP-BAD"]
-            B1["Metoda amplitudy: peak-to-peak (Peak-Valley)\n= globalny max minus globalny min w oknie P300\nWygładzenie epok S1: Low-pass 10 Hz\n(wymuszone automatycznie dla metod Peak)"]
-        end
+| Parametr | Wartość | Uwaga |
+| -------- | ------- | ----- |
+| Okno | −0.2 s – 1.0 s | relative to stimulus onset |
+| Detrend | DC offset | odjęcie średniej linii bazowej |
+| Odrzucanie artefaktów | autoreject | adaptive_k nie jest próbkowane - autoreject wyznacza próg automatycznie |
+| Mirror S2→S1 | TAK | S2 używa tych samych ustawień epokowania co S1 |
 
-        F1 ~~~ EP1
-        EP1 ~~~ P1
-        P1 ~~~ B1
-    end
+**Okno P300 - tryb: individual (indywidualne)**
 
-    BEST_CFG --> RESULTS
+| Parametr | Wartość |
+| -------- | ------- |
+| Przeszukiwany przedział | 0.25 – 0.75 s po bodźcu |
+| Margines ± | 0.15 s |
+| Wygładzenie ERP S2 | 10 Hz LP |
+| Wynikowe okno | czas szczytu P300 ± 0.15 s (różne per uczestnik) |
 
-    subgraph RESULTS["Wyniki LOOCV (N = 11 | β = 0.5)"]
-        direction TB
+**CTP-BAD**
 
-        subgraph MET["Metryki"]
-            M1["ROC-AUC:      0.9333\nAccuracy:     72.7%  (8 / 11 poprawnych)\nSensitivity:  66.7%  (4 / 6 guilty wykrytych)\nSpecificity:  80.0%  (4 / 5 innocent oczyszczonych)\nF-β (β=0.5): 0.7692"]
-        end
+| Parametr | Wartość | Uwaga |
+| -------- | ------- | ----- |
+| Metoda amplitudy | peak-to-peak (Peak-Valley) | globalny max minus globalny min w oknie P300 |
+| Wygładzenie epok S1 | Low-pass 10 Hz | wymuszone automatycznie dla metod Peak |
 
-        subgraph INTERP["Interpretacja"]
-            I1["β = 0.5 → specyficzność ważniejsza od czułości\n= wolimy nie oskarżać niewinnych kosztem nieznalezienia winnego\n\nAUC = 0.93 → max_prop dobrze separuje grupy\nguilty / innocent niezależnie od progu\n\n2 osoby guilty niezaklasyfikowane → FN\n1 osoba innocent sklasyfikowana jako guilty → FP"]
-        end
+---
 
-        M1 ~~~ I1
-    end
-```
+### Wyniki LOOCV (N = 11, β = 0.5)
 
-
-
-**Macierz pomyłek (N = 11):**
-
+**Macierz pomyłek:**
 
 |                           | Pred. GUILTY | Pred. INNOCENT |
-| ------------------------- | ------------ | -------------- |
+| ------------------------- | :----------: | :------------: |
 | **Actual GUILTY** (n=6)   | 4 - TP       | 2 - FN         |
 | **Actual INNOCENT** (n=5) | 1 - FP       | 4 - TN         |
 
+**Metryki:**
 
-### Opis
+| Metryka | Wartość | |
+| ------- | ------- | - |
+| ROC-AUC | 0.9333 | |
+| Accuracy | 72.7% | 8 / 11 poprawnych |
+| Sensitivity (czułość) | 66.7% | 4 / 6 guilty wykrytych |
+| Specificity (swoistość) | 80.0% | 4 / 5 innocent oczyszczonych |
+| F-β (β = 0.5) | 0.7692 | |
+
+**Interpretacja:**
+- β = 0.5 → specyficzność ważniejsza od czułości: wolimy nie oskarżać niewinnych kosztem nieznalezienia wszystkich winnych
+- AUC = 0.93 → `max_prop` dobrze separuje grupy guilty/innocent niezależnie od progu
+- 2 osoby guilty niezaklasyfikowane (FN), 1 osoba innocent sklasyfikowana jako guilty (FP)
 
 **Jak interpretować wyniki przy N = 11?**
-AUC = 0.93 to silny sygnał, że `max_prop` faktycznie rozróżnia grupy. Jednak bezpośrednie metryki (Sensitivity = 66.7%, Accuracy = 72.7%) są umiarkowane - przy N = 11 jedna pomyłka zmienia Accuracy o ~9 p.p., więc wyniki należy traktować ostrożnie. Ważne jest też to, że F-β(0.5) premiuje Specificity: z 5 niewinnych uczestników 4 zostało poprawnie oczyszczonych (FP = 1).
+AUC = 0.93 to silny sygnał, że `max_prop` faktycznie rozróżnia grupy. Jednak bezpośrednie metryki (Sensitivity = 66.7%, Accuracy = 72.7%) są umiarkowane - przy N = 11 jedna pomyłka zmienia Accuracy o ~9 p.p., więc wyniki należy traktować ostrożnie. F-β(0.5) premiuje Specificity: z 5 niewinnych uczestników 4 zostało poprawnie oczyszczonych (FP = 1).
