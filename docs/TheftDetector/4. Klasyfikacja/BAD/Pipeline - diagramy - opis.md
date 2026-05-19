@@ -132,11 +132,6 @@ flowchart TD
 
 ### Opis
 
-Optuna TPE (Tree-structured Parzen Estimator) to bayesowska metoda optymalizacji. W odróżnieniu od prostego Grid Search, po każdym trialu TPE buduje probabilistyczny model zależności między parametrami a wynikiem - i proponuje kolejne kombinacje z wyższym oczekiwanym AUC. Dzięki temu 200 triali eksploruje przestrzeń bardziej efektywnie niż równoważna siatka.
-
-**Dlaczego ROC-AUC jako cel, a nie Accuracy?**
-ROC-AUC mierzy zdolność `max_prop` do odróżnienia grup guilty/innocent niezależnie od wyboru konkretnego progu decyzyjnego. Accuracy zależy od progu - a ten jest zawsze dobierany per fold LOOCV, więc AUC jest bardziej stabilną i uczciwszą miarą do optymalizacji.
-
 **Mirror S2→S1** oznacza, że epoki S2 (kalibracyjne) są wycinane i filtrowane tymi samymi parametrami co epoki S1 (główne) - gwarantuje to spójność preprocessing u między obiema ścieżkami.
 
 **Pojęcia:**
