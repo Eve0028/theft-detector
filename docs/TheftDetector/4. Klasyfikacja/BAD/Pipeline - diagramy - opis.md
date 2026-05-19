@@ -206,14 +206,14 @@ Procedura LOOCV jest identyczna z tą w ocenie trialu Optuny. Jedyna różnica t
 | sweep 201 progów   | Dla każdego możliwego progu od 0 do 1 (201 równomiernych kroków) sprawdź F-β na zbiorze treningowym         |
 | resubstitution AUC | AUC liczone na wszystkich N wynikach bez podziału na foldy - mierzy separowalność grup, nie zależy od progu |
 | Sensitivity        | Czułość = TP / (TP+FN): odsetek rzeczywiście winnych, których poprawnie wykryto                             |
-| Specificity        | Swoistość = TN / (TN+FP): odsetek rzeczywiście niewinnych, których poprawnie oczyszczono                    |
+| Specificity        | Swoistość = TN / (TN+FP): odsetek rzeczywiście niewinnych, których poprawnie oczyszczono z zarzutów                    |
 
 
 ---
 
 ## Diagram 4 - Najlepsza konfiguracja i wyniki
 
-Najlepsza konfiguracja z 200 triali Optuny. Pokazane metryki pochodzą z oceny **tego konkretnego trialu** (N_bootstrap = 1000 | LOOCV | F-β = 0.5 | Mirror S2→S1) - nie z oddzielnego uruchomienia Quick Pipeline (Diagram 3).
+Najlepsza konfiguracja z 200 triali Optuny.
 
 ```mermaid
 flowchart LR
