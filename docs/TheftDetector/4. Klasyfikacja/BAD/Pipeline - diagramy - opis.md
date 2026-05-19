@@ -208,7 +208,7 @@ Procedura LOOCV jest identyczna z tą w ocenie trialu Optuny. Jedyna różnica t
 
 ## Najlepsza konfiguracja i wyniki (trial wygrywający Optuny)
 
-Najlepsza konfiguracja z 200 triali Optuny. Pokazane metryki pochodzą z oceny tego konkretnego trialu (N_bootstrap = 1000 | LOOCV | F-β = 0.5 | Mirror S2→S1) - nie z oddzielnego uruchomienia Quick Pipeline (Diagram 3).
+Najlepsza konfiguracja z 200 triali Optuny.
 
 ### Parametry
 
